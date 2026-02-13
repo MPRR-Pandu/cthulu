@@ -1,0 +1,4 @@
+/target
+.env
+*.p8
+.DS_STORE

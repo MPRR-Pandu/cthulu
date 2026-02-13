@@ -1,4 +1,5 @@
 pub mod middleware;
+pub mod slices;
 
 use axum::body::Body;
 use axum::extract::Request;
@@ -33,8 +34,11 @@ pub fn create_app(state: AppState) -> Router {
         }),
     );
 
+    let claude_routes = slices::claude::routes::routes();
+
     Router::new()
         .nest("/health", health_routes)
+        .nest("/claude", claude_routes)
         .fallback(not_found)
         .with_state(state)
         .layer(axum::middleware::from_fn(strip_trailing_slash))

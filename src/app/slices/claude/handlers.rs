@@ -28,6 +28,7 @@ pub async fn run_claude(
     let stream = async_stream::stream! {
         let mut child = match Command::new("claude")
             .arg("--print")
+            .arg("--dangerously-skip-permissions")
             .arg(&body.prompt)
             .current_dir(&working_dir)
             .env_remove("CLAUDECODE")

@@ -17,6 +17,7 @@ use crate::app::middleware::strip_trailing_slash::strip_trailing_slash;
 #[derive(Clone)]
 pub struct AppState {
     pub http_client: Arc<Client>,
+    pub review_state: Arc<slices::github_reviews::ReviewState>,
 }
 
 async fn not_found(req: Request<Body>) -> impl IntoResponse {
@@ -35,10 +36,12 @@ pub fn create_app(state: AppState) -> Router {
     );
 
     let claude_routes = slices::claude::routes::routes();
+    let review_routes = slices::github_reviews::routes::routes();
 
     Router::new()
         .nest("/health", health_routes)
         .nest("/claude", claude_routes)
+        .nest("/reviews", review_routes)
         .fallback(not_found)
         .with_state(state)
         .layer(axum::middleware::from_fn(strip_trailing_slash))

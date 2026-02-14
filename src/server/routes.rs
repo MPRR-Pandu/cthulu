@@ -135,9 +135,11 @@ async fn review_status(State(state): State<AppState>) -> Json<Value> {
     let seen_prs: serde_json::Map<String, Value> = seen
         .iter()
         .map(|(repo, prs)| {
-            let mut numbers: Vec<u64> = prs.iter().copied().collect();
-            numbers.sort();
-            (repo.clone(), json!(numbers))
+            let pr_map: serde_json::Map<String, Value> = prs
+                .iter()
+                .map(|(num, sha)| (num.to_string(), json!(sha)))
+                .collect();
+            (repo.clone(), json!(pr_map))
         })
         .collect();
 
@@ -214,12 +216,6 @@ async fn trigger_review(
     let repo_slug = body.repo.clone();
     let github_client = github_client.clone();
 
-    // Mark as seen
-    {
-        let mut seen = task_state.seen_prs.lock().await;
-        seen.entry(repo_slug.clone()).or_default().insert(pr_number);
-    }
-
     tokio::spawn(async move {
         let pr = match github_client
             .fetch_single_pr(&owner, &repo_name, pr_number)
@@ -231,6 +227,14 @@ async fn trigger_review(
                 return;
             }
         };
+
+        // Mark as seen with actual SHA (after fetch to avoid race with poll loop)
+        {
+            let mut seen = task_state.seen_prs.lock().await;
+            seen.entry(repo_slug.clone())
+                .or_default()
+                .insert(pr_number, pr.head.sha.clone());
+        }
 
         let diff = match github_client
             .fetch_pr_diff(&owner, &repo_name, pr_number)
@@ -253,6 +257,7 @@ async fn trigger_review(
         context.insert("head_sha".to_string(), pr.head.sha.clone());
         context.insert("repo".to_string(), repo_slug);
         context.insert("local_path".to_string(), local_path.display().to_string());
+        context.insert("review_type".to_string(), "initial".to_string());
 
         let rendered = crate::tasks::context::render_prompt(&prompt_template, &context);
 

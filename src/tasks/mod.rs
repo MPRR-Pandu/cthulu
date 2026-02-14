@@ -8,6 +8,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::config::{ExecutorType, TaskConfig};
+use crate::github::client::{GithubClient, HttpGithubClient};
 use crate::tasks::executors::claude_code::ClaudeCodeExecutor;
 use crate::tasks::executors::Executor;
 use crate::tasks::triggers::github::GithubPrTrigger;
@@ -36,7 +37,7 @@ pub async fn spawn_task(
 ) {
     if let Some(gh_config) = &task.trigger.github {
         let Some(token) = github_token else {
-            tracing::warn!(task = %task.name, "GitHub trigger configured but no GITHUB_TOKEN set — skipping");
+            tracing::warn!(task = %task.name, "GitHub trigger configured but no GITHUB_TOKEN set -- skipping");
             return;
         };
 
@@ -56,9 +57,13 @@ pub async fn spawn_task(
             }
         };
 
+        let github_client: Arc<dyn GithubClient> = Arc::new(HttpGithubClient::new(
+            (*http_client).clone(),
+            token,
+        ));
+
         let trigger = GithubPrTrigger::new(
-            http_client.clone(),
-            token.clone(),
+            github_client,
             gh_config.clone(),
             task_state.clone(),
         );
@@ -77,17 +82,15 @@ pub async fn spawn_task(
                     &task_name,
                     &prompt_template,
                     executor.as_ref(),
-                    &http_client,
-                    &token,
                     &task_state,
                 )
                 .await;
         });
     } else if task.trigger.cron.is_some() {
-        tracing::warn!(task = %task.name, "Cron trigger not yet implemented — skipping");
+        tracing::warn!(task = %task.name, "Cron trigger not yet implemented -- skipping");
     } else if task.trigger.webhook.is_some() {
-        tracing::warn!(task = %task.name, "Webhook trigger not yet implemented — skipping");
+        tracing::warn!(task = %task.name, "Webhook trigger not yet implemented -- skipping");
     } else {
-        tracing::warn!(task = %task.name, "No trigger configured — skipping");
+        tracing::warn!(task = %task.name, "No trigger configured -- skipping");
     }
 }

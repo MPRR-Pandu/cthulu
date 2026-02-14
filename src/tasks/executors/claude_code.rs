@@ -16,7 +16,7 @@ impl ClaudeCodeExecutor {
         Self { permissions }
     }
 
-    fn build_args(&self) -> Vec<String> {
+    pub fn build_args(&self) -> Vec<String> {
         let mut args = vec![
             "--print".to_string(),
             "--verbose".to_string(),
@@ -180,5 +180,56 @@ impl Executor for ClaudeCodeExecutor {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_build_args_with_permissions() {
+        let executor = ClaudeCodeExecutor::new(vec![
+            "Bash".to_string(),
+            "Read".to_string(),
+            "Grep".to_string(),
+        ]);
+        let args = executor.build_args();
+        assert!(args.contains(&"--print".to_string()));
+        assert!(args.contains(&"--verbose".to_string()));
+        assert!(args.contains(&"--allowedTools".to_string()));
+        assert!(args.contains(&"Bash,Read,Grep".to_string()));
+        assert!(!args.contains(&"--dangerously-skip-permissions".to_string()));
+    }
+
+    #[test]
+    fn test_build_args_no_permissions_uses_dangerous() {
+        let executor = ClaudeCodeExecutor::new(vec![]);
+        let args = executor.build_args();
+        assert!(args.contains(&"--dangerously-skip-permissions".to_string()));
+        assert!(!args.contains(&"--allowedTools".to_string()));
+    }
+
+    #[test]
+    fn test_build_args_single_permission() {
+        let executor = ClaudeCodeExecutor::new(vec!["Read".to_string()]);
+        let args = executor.build_args();
+        assert!(args.contains(&"--allowedTools".to_string()));
+        assert!(args.contains(&"Read".to_string()));
+    }
+
+    #[test]
+    fn test_build_args_always_reads_stdin() {
+        let executor = ClaudeCodeExecutor::new(vec![]);
+        let args = executor.build_args();
+        assert_eq!(args.last().unwrap(), "-");
+    }
+
+    #[test]
+    fn test_build_args_output_format() {
+        let executor = ClaudeCodeExecutor::new(vec![]);
+        let args = executor.build_args();
+        let fmt_idx = args.iter().position(|a| a == "--output-format").unwrap();
+        assert_eq!(args[fmt_idx + 1], "stream-json");
     }
 }

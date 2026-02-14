@@ -16,6 +16,8 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
+use crate::github::client::{GithubClient, HttpGithubClient};
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     dotenv().ok();
@@ -54,6 +56,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let http_client = Arc::new(reqwest::Client::new());
     let github_token = config.github_token();
     let task_state = Arc::new(tasks::TaskState::new());
+
+    let github_client: Option<Arc<dyn GithubClient>> = github_token.as_ref().map(|token| {
+        Arc::new(HttpGithubClient::new((*http_client).clone(), token.clone())) as Arc<dyn GithubClient>
+    });
+
     let config = Arc::new(config);
 
     // Spawn all configured tasks
@@ -68,9 +75,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let app_state = server::AppState {
-        http_client,
         task_state,
         config: config.clone(),
+        github_client,
     };
 
     let app = server::create_app(app_state)

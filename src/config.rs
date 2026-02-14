@@ -114,3 +114,195 @@ impl Config {
             .unwrap_or_default()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(toml_str: &str) -> Config {
+        toml::from_str(toml_str).unwrap()
+    }
+
+    #[test]
+    fn test_minimal_config() {
+        let config = parse(r#"
+            [server]
+        "#);
+        assert_eq!(config.server.port, 8081);
+        assert_eq!(config.server.environment, "local");
+        assert!(config.github.is_none());
+        assert!(config.tasks.is_empty());
+    }
+
+    #[test]
+    fn test_full_config() {
+        let config = parse(r#"
+            [server]
+            port = 9090
+            environment = "production"
+            sentry_dsn_env = "MY_SENTRY"
+
+            [github]
+            token_env = "GH_TOKEN"
+
+            [[tasks]]
+            name = "pr-review"
+            executor = "claude-code"
+            prompt = "prompts/pr_review.md"
+            permissions = ["Bash", "Read"]
+
+            [tasks.trigger.github]
+            event = "pull_request"
+            repos = [
+              { slug = "owner/repo", path = "/tmp/repo" },
+            ]
+            poll_interval = 30
+        "#);
+        assert_eq!(config.server.port, 9090);
+        assert_eq!(config.server.environment, "production");
+        assert_eq!(config.github.unwrap().token_env, "GH_TOKEN");
+        assert_eq!(config.tasks.len(), 1);
+
+        let task = &config.tasks[0];
+        assert_eq!(task.name, "pr-review");
+        assert_eq!(task.permissions, vec!["Bash", "Read"]);
+
+        let gh = task.trigger.github.as_ref().unwrap();
+        assert_eq!(gh.event, "pull_request");
+        assert_eq!(gh.repos.len(), 1);
+        assert_eq!(gh.repos[0].slug, "owner/repo");
+        assert_eq!(gh.poll_interval, 30);
+    }
+
+    #[test]
+    fn test_default_poll_interval() {
+        let config = parse(r#"
+            [server]
+
+            [[tasks]]
+            name = "test"
+            executor = "claude-code"
+            prompt = "test.md"
+
+            [tasks.trigger.github]
+            event = "pull_request"
+            repos = [{ slug = "o/r", path = "/tmp" }]
+        "#);
+        let gh = config.tasks[0].trigger.github.as_ref().unwrap();
+        assert_eq!(gh.poll_interval, 60);
+    }
+
+    #[test]
+    fn test_cron_trigger() {
+        let config = parse(r#"
+            [server]
+
+            [[tasks]]
+            name = "scheduled"
+            executor = "claude-code"
+            prompt = "test.md"
+
+            [tasks.trigger.cron]
+            schedule = "0 9 * * MON-FRI"
+        "#);
+        let cron = config.tasks[0].trigger.cron.as_ref().unwrap();
+        assert_eq!(cron.schedule, "0 9 * * MON-FRI");
+        assert!(config.tasks[0].trigger.github.is_none());
+    }
+
+    #[test]
+    fn test_webhook_trigger() {
+        let config = parse(r#"
+            [server]
+
+            [[tasks]]
+            name = "webhook-task"
+            executor = "claude-api"
+            prompt = "test.md"
+
+            [tasks.trigger.webhook]
+            path = "/hooks/deploy"
+        "#);
+        let wh = config.tasks[0].trigger.webhook.as_ref().unwrap();
+        assert_eq!(wh.path, "/hooks/deploy");
+    }
+
+    #[test]
+    fn test_multiple_tasks() {
+        let config = parse(r#"
+            [server]
+
+            [[tasks]]
+            name = "task-a"
+            executor = "claude-code"
+            prompt = "a.md"
+            [tasks.trigger.cron]
+            schedule = "daily"
+
+            [[tasks]]
+            name = "task-b"
+            executor = "claude-api"
+            prompt = "b.md"
+            [tasks.trigger.webhook]
+            path = "/hooks/b"
+        "#);
+        assert_eq!(config.tasks.len(), 2);
+        assert_eq!(config.tasks[0].name, "task-a");
+        assert_eq!(config.tasks[1].name, "task-b");
+    }
+
+    #[test]
+    fn test_empty_permissions_default() {
+        let config = parse(r#"
+            [server]
+
+            [[tasks]]
+            name = "test"
+            executor = "claude-code"
+            prompt = "test.md"
+            [tasks.trigger.cron]
+            schedule = "daily"
+        "#);
+        assert!(config.tasks[0].permissions.is_empty());
+    }
+
+    #[test]
+    fn test_repo_entry_owner_repo() {
+        let entry = RepoEntry {
+            slug: "bitcoin-portal/RustServer".to_string(),
+            path: PathBuf::from("/tmp"),
+        };
+        let (owner, repo) = entry.owner_repo().unwrap();
+        assert_eq!(owner, "bitcoin-portal");
+        assert_eq!(repo, "RustServer");
+    }
+
+    #[test]
+    fn test_repo_entry_invalid_slug() {
+        let entry = RepoEntry {
+            slug: "no-slash-here".to_string(),
+            path: PathBuf::from("/tmp"),
+        };
+        assert!(entry.owner_repo().is_none());
+    }
+
+    #[test]
+    fn test_invalid_toml_fails() {
+        let result: Result<Config, _> = toml::from_str("not valid toml {{{}}}");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_missing_required_field_fails() {
+        // name is required on tasks
+        let result: Result<Config, _> = toml::from_str(r#"
+            [server]
+            [[tasks]]
+            executor = "claude-code"
+            prompt = "test.md"
+            [tasks.trigger.cron]
+            schedule = "daily"
+        "#);
+        assert!(result.is_err());
+    }
+}

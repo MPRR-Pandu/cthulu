@@ -16,7 +16,6 @@ use tokio_stream::StreamExt;
 
 use super::middleware;
 use super::AppState;
-use crate::github::client as gh_client;
 use crate::tasks::executors::Executor;
 
 pub fn build_router(state: AppState) -> Router {
@@ -161,7 +160,6 @@ async fn trigger_review(
 ) -> (StatusCode, Json<Value>) {
     let config = &state.config;
 
-    // Find a task with a github trigger that has a matching repo
     let matching_task = config.tasks.iter().find(|t| {
         t.trigger
             .github
@@ -188,9 +186,8 @@ async fn trigger_review(
         .iter()
         .find(|r| r.slug == body.repo)
         .unwrap();
-    let (owner, repo_name) = repo_entry.owner_repo().unwrap();
 
-    let Some(token) = config.github_token() else {
+    let Some(github_client) = &state.github_client else {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "error": "GITHUB_TOKEN not configured" })),
@@ -207,7 +204,7 @@ async fn trigger_review(
         }
     };
 
-    let client = state.http_client.clone();
+    let (owner, repo_name) = repo_entry.owner_repo().unwrap();
     let pr_number = body.pr;
     let task_state = state.task_state.clone();
     let permissions = task.permissions.clone();
@@ -215,6 +212,7 @@ async fn trigger_review(
     let owner = owner.to_string();
     let repo_name = repo_name.to_string();
     let repo_slug = body.repo.clone();
+    let github_client = github_client.clone();
 
     // Mark as seen
     {
@@ -223,7 +221,8 @@ async fn trigger_review(
     }
 
     tokio::spawn(async move {
-        let pr = match gh_client::fetch_single_pr(&client, &token, &owner, &repo_name, pr_number)
+        let pr = match github_client
+            .fetch_single_pr(&owner, &repo_name, pr_number)
             .await
         {
             Ok(pr) => pr,
@@ -233,7 +232,8 @@ async fn trigger_review(
             }
         };
 
-        let diff = match gh_client::fetch_pr_diff(&client, &token, &owner, &repo_name, pr_number)
+        let diff = match github_client
+            .fetch_pr_diff(&owner, &repo_name, pr_number)
             .await
         {
             Ok(d) => d,

@@ -60,6 +60,20 @@ impl GithubPrTrigger {
                         let mut seen = self.task_state.seen_prs.lock().await;
                         let pr_shas: HashMap<u64, String> = prs
                             .iter()
+                            .filter(|pr| {
+                                // Don't seed draft PRs when skip_drafts is enabled.
+                                // This way they'll appear as "new" when un-drafted.
+                                if pr.draft && self.config.skip_drafts {
+                                    tracing::debug!(
+                                        repo = %repo.full_name(),
+                                        pr = pr.number,
+                                        "Skipping draft PR #{} during seed",
+                                        pr.number
+                                    );
+                                    return false;
+                                }
+                                true
+                            })
                             .map(|pr| (pr.number, pr.head.sha.clone()))
                             .collect();
                         tracing::info!(
@@ -519,13 +533,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_seed_skips_drafts_in_seen() {
-        // Seed should record ALL PRs (including drafts) so we don't
-        // review them when they get un-drafted
+    async fn test_seed_skips_drafts_when_skip_drafts_enabled() {
         let prs = vec![make_pr(1, "Ready"), make_draft_pr(2, "WIP")];
         let mock_client = Arc::new(MockGithubClient::new(prs, ""));
         let task_state = Arc::new(TaskState::new());
 
+        // skip_drafts = true (default)
         let config = make_config(vec![RepoEntry {
             slug: "owner/repo".to_string(),
             path: PathBuf::from("/tmp/repo"),
@@ -536,7 +549,34 @@ mod tests {
 
         let seen = task_state.seen_prs.lock().await;
         let repo_seen = seen.get("owner/repo").unwrap();
-        // Both are seeded (even the draft)
+        // Only non-draft PR is seeded
+        assert_eq!(repo_seen.len(), 1);
+        assert!(repo_seen.contains_key(&1));
+        assert!(!repo_seen.contains_key(&2));
+    }
+
+    #[tokio::test]
+    async fn test_seed_includes_drafts_when_skip_drafts_disabled() {
+        let prs = vec![make_pr(1, "Ready"), make_draft_pr(2, "WIP")];
+        let mock_client = Arc::new(MockGithubClient::new(prs, ""));
+        let task_state = Arc::new(TaskState::new());
+
+        // skip_drafts = false
+        let config = make_config_with_options(
+            vec![RepoEntry {
+                slug: "owner/repo".to_string(),
+                path: PathBuf::from("/tmp/repo"),
+            }],
+            false,
+            false,
+        );
+
+        let trigger = GithubPrTrigger::new(mock_client, config, task_state.clone());
+        trigger.seed().await.unwrap();
+
+        let seen = task_state.seen_prs.lock().await;
+        let repo_seen = seen.get("owner/repo").unwrap();
+        // Both seeded when skip_drafts is disabled
         assert_eq!(repo_seen.len(), 2);
     }
 
@@ -562,13 +602,10 @@ mod tests {
         assert!(draft.draft);
     }
 
-    /// When skip_drafts is enabled and a draft PR appears in the fetched list,
-    /// the poll loop should skip it. We test this by seeding with an empty repo,
-    /// then checking that a draft PR would be filtered by the skip condition.
+    /// When skip_drafts is enabled, draft PRs are NOT seeded.
+    /// This means when they get un-drafted, they appear as new PRs.
     #[tokio::test]
-    async fn test_draft_detection_in_seen_prs() {
-        // If a draft PR is seeded, it should still be in seen_prs (so we
-        // don't re-review it when it gets un-drafted unexpectedly)
+    async fn test_draft_prs_not_seeded_when_skip_drafts() {
         let prs = vec![make_draft_pr(10, "WIP Feature")];
         let mock_client = Arc::new(MockGithubClient::new(prs, ""));
         let task_state = Arc::new(TaskState::new());
@@ -583,8 +620,8 @@ mod tests {
 
         let seen = task_state.seen_prs.lock().await;
         let repo_seen = seen.get("owner/repo").unwrap();
-        // Draft PR is seeded with its SHA
-        assert_eq!(repo_seen.get(&10).unwrap(), "sha-10");
+        // Draft PR is NOT seeded (so it will be reviewed when un-drafted)
+        assert!(!repo_seen.contains_key(&10));
     }
 
     /// Verify that when a PR's SHA changes, the seen_prs map correctly

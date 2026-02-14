@@ -216,14 +216,6 @@ async fn trigger_review(
     let repo_slug = body.repo.clone();
     let github_client = github_client.clone();
 
-    // Mark as seen (with placeholder SHA, will be updated after fetch)
-    {
-        let mut seen = task_state.seen_prs.lock().await;
-        seen.entry(repo_slug.clone())
-            .or_default()
-            .insert(pr_number, String::new());
-    }
-
     tokio::spawn(async move {
         let pr = match github_client
             .fetch_single_pr(&owner, &repo_name, pr_number)
@@ -236,7 +228,7 @@ async fn trigger_review(
             }
         };
 
-        // Update seen_prs with actual SHA
+        // Mark as seen with actual SHA (after fetch to avoid race with poll loop)
         {
             let mut seen = task_state.seen_prs.lock().await;
             seen.entry(repo_slug.clone())
@@ -265,6 +257,7 @@ async fn trigger_review(
         context.insert("head_sha".to_string(), pr.head.sha.clone());
         context.insert("repo".to_string(), repo_slug);
         context.insert("local_path".to_string(), local_path.display().to_string());
+        context.insert("review_type".to_string(), "initial".to_string());
 
         let rendered = crate::tasks::context::render_prompt(&prompt_template, &context);
 

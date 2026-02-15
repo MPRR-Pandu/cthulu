@@ -214,6 +214,7 @@ async fn trigger_review(
     let owner = owner.to_string();
     let repo_name = repo_name.to_string();
     let repo_slug = body.repo.clone();
+    let max_diff_size = gh_trigger.max_diff_size;
     let github_client = github_client.clone();
 
     tokio::spawn(async move {
@@ -247,8 +248,19 @@ async fn trigger_review(
             }
         };
 
+        let diff_ctx = match crate::tasks::diff::prepare_diff_context(&diff, pr_number, max_diff_size) {
+            Ok(ctx) => ctx,
+            Err(e) => {
+                tracing::error!(error = %e, "Failed to prepare diff context for manual trigger");
+                return;
+            }
+        };
+        let diff_value = match &diff_ctx {
+            crate::tasks::diff::DiffContext::Inline(d) => d.clone(),
+            crate::tasks::diff::DiffContext::Chunked { manifest, .. } => manifest.clone(),
+        };
         let mut context = std::collections::HashMap::new();
-        context.insert("diff".to_string(), diff);
+        context.insert("diff".to_string(), diff_value);
         context.insert("pr_number".to_string(), pr.number.to_string());
         context.insert("pr_title".to_string(), pr.title.clone());
         context.insert("pr_body".to_string(), pr.body.unwrap_or_default());
@@ -286,6 +298,8 @@ async fn trigger_review(
                 tracing::error!(pr = pr_number, error = %e, "Manual review failed");
             }
         }
+
+        crate::tasks::diff::cleanup(&diff_ctx);
     });
 
     (

@@ -28,6 +28,14 @@ impl CronTrigger {
         let cron = Cron::new(schedule)
             .parse()
             .map_err(|e| anyhow::anyhow!("invalid cron expression '{}': {}", schedule, e))?;
+
+        // Validate sink env var at startup so we fail fast
+        if let Some(SinkConfig::Slack { webhook_url_env }) = &sink {
+            std::env::var(webhook_url_env).with_context(|| {
+                format!("sink requires env var {webhook_url_env} but it is not set")
+            })?;
+        }
+
         Ok(Self {
             cron,
             sources,
@@ -139,7 +147,11 @@ fn format_items(items: &[ContentItem]) -> String {
                 .unwrap_or_else(|| "unknown date".to_string());
 
             let summary_short = if item.summary.len() > 500 {
-                format!("{}...", &item.summary[..500])
+                let mut end = 500;
+                while !item.summary.is_char_boundary(end) {
+                    end -= 1;
+                }
+                format!("{}...", &item.summary[..end])
             } else {
                 item.summary.clone()
             };

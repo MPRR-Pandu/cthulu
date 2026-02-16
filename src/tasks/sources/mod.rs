@@ -1,6 +1,7 @@
 pub mod rss;
 
 use chrono::{DateTime, Utc};
+use futures::future::join_all;
 
 use crate::config::SourceConfig;
 
@@ -16,19 +17,25 @@ pub async fn fetch_all(
     sources: &[SourceConfig],
     http_client: &reqwest::Client,
 ) -> Vec<ContentItem> {
-    let mut items = Vec::new();
-    for source in sources {
-        match source {
-            SourceConfig::Rss { url, limit } => match rss::fetch_feed(http_client, url, *limit).await {
-                Ok(feed_items) => {
-                    tracing::info!(url = %url, count = feed_items.len(), "Fetched RSS feed");
-                    items.extend(feed_items);
+    let futures: Vec<_> = sources
+        .iter()
+        .map(|source| async move {
+            match source {
+                SourceConfig::Rss { url, limit } => {
+                    match rss::fetch_feed(http_client, url, *limit).await {
+                        Ok(feed_items) => {
+                            tracing::info!(url = %url, count = feed_items.len(), "Fetched RSS feed");
+                            feed_items
+                        }
+                        Err(e) => {
+                            tracing::error!(url = %url, error = %e, "Failed to fetch RSS feed");
+                            Vec::new()
+                        }
+                    }
                 }
-                Err(e) => {
-                    tracing::error!(url = %url, error = %e, "Failed to fetch RSS feed");
-                }
-            },
-        }
-    }
-    items
+            }
+        })
+        .collect();
+
+    join_all(futures).await.into_iter().flatten().collect()
 }

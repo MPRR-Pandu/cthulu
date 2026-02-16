@@ -13,6 +13,8 @@ pub async fn fetch_feed(
         .send()
         .await
         .context("failed to fetch feed")?
+        .error_for_status()
+        .with_context(|| format!("feed returned error status: {url}"))?
         .bytes()
         .await
         .context("failed to read feed body")?;

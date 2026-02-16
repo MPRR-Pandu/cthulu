@@ -22,7 +22,8 @@ pub struct CronTrigger {
 }
 
 enum ResolvedSink {
-    Slack { webhook_url: String },
+    SlackWebhook { webhook_url: String },
+    SlackApi { bot_token: String, channel: String },
 }
 
 impl CronTrigger {
@@ -38,13 +39,29 @@ impl CronTrigger {
             .parse()
             .map_err(|e| anyhow::anyhow!("invalid cron expression '{}': {}", schedule, e))?;
 
-        // Resolve sink env var at startup so we fail fast
+        // Resolve sink env vars at startup so we fail fast
         let resolved_sink = match sink {
-            Some(SinkConfig::Slack { webhook_url_env }) => {
-                let webhook_url = std::env::var(&webhook_url_env).with_context(|| {
-                    format!("sink requires env var {webhook_url_env} but it is not set")
-                })?;
-                Some(ResolvedSink::Slack { webhook_url })
+            Some(SinkConfig::Slack {
+                webhook_url_env,
+                bot_token_env,
+                channel,
+            }) => {
+                if let Some(token_env) = bot_token_env {
+                    let bot_token = std::env::var(&token_env).with_context(|| {
+                        format!("sink requires env var {token_env} but it is not set")
+                    })?;
+                    let channel = channel.with_context(|| {
+                        "slack bot_token_env requires a channel to be set"
+                    })?;
+                    Some(ResolvedSink::SlackApi { bot_token, channel })
+                } else if let Some(webhook_env) = webhook_url_env {
+                    let webhook_url = std::env::var(&webhook_env).with_context(|| {
+                        format!("sink requires env var {webhook_env} but it is not set")
+                    })?;
+                    Some(ResolvedSink::SlackWebhook { webhook_url })
+                } else {
+                    anyhow::bail!("slack sink requires either webhook_url_env or bot_token_env");
+                }
             }
             None => None,
         };
@@ -142,10 +159,20 @@ impl CronTrigger {
         if let Some(sink) = &self.sink {
             if !exec_result.text.is_empty() {
                 match sink {
-                    ResolvedSink::Slack { webhook_url } => {
+                    ResolvedSink::SlackWebhook { webhook_url } => {
                         sinks::slack::post_to_url(&self.http_client, webhook_url, &exec_result.text)
                             .await
-                            .context("failed to deliver to Slack")?;
+                            .context("failed to deliver to Slack webhook")?;
+                    }
+                    ResolvedSink::SlackApi { bot_token, channel } => {
+                        sinks::slack::post_threaded_blocks(
+                            &self.http_client,
+                            bot_token,
+                            channel,
+                            &exec_result.text,
+                        )
+                        .await
+                        .context("failed to deliver to Slack API")?;
                     }
                 }
             } else {

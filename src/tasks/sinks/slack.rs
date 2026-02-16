@@ -1,5 +1,37 @@
 use anyhow::{Context, Result};
+use serde::Serialize;
 use serde_json::json;
+
+// ---------------------------------------------------------------------------
+// Block Kit types
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Block {
+    Header {
+        text: TextObject,
+    },
+    Section {
+        text: TextObject,
+    },
+    Divider,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TextObject {
+    #[serde(rename = "type")]
+    pub kind: &'static str,
+    pub text: String,
+}
+
+const MAX_HEADER_LEN: usize = 150;
+const MAX_SECTION_LEN: usize = 3000;
+const MAX_BLOCKS_PER_MESSAGE: usize = 50;
+
+// ---------------------------------------------------------------------------
+// Webhook (legacy) path — unchanged
+// ---------------------------------------------------------------------------
 
 pub async fn post_message(
     client: &reqwest::Client,
@@ -35,6 +67,216 @@ pub async fn post_to_url(
     tracing::info!("Delivered message to Slack");
     Ok(())
 }
+
+// ---------------------------------------------------------------------------
+// Web API (Block Kit + threading) path
+// ---------------------------------------------------------------------------
+
+/// Post a message with Block Kit formatting and optional threading.
+///
+/// If `full_text` contains a `---THREAD---` delimiter, the part above becomes
+/// the main channel message and the part below is posted as a thread reply.
+pub async fn post_threaded_blocks(
+    client: &reqwest::Client,
+    bot_token: &str,
+    channel: &str,
+    full_text: &str,
+) -> Result<()> {
+    let parts: Vec<&str> = full_text.splitn(2, "---THREAD---").collect();
+
+    let main_text = parts[0].trim();
+    let thread_text = parts.get(1).map(|s| s.trim());
+
+    let main_blocks = markdown_to_blocks(main_text);
+    let ts = post_blocks(client, bot_token, channel, &main_blocks, None)
+        .await
+        .context("failed to post main message")?;
+
+    if let Some(detail) = thread_text {
+        if !detail.is_empty() {
+            let thread_blocks = markdown_to_blocks(detail);
+            post_blocks(client, bot_token, channel, &thread_blocks, Some(&ts))
+                .await
+                .context("failed to post thread reply")?;
+        }
+    }
+
+    tracing::info!("Delivered Block Kit message to Slack");
+    Ok(())
+}
+
+/// Post blocks to Slack via `chat.postMessage`. Returns the message `ts`.
+async fn post_blocks(
+    client: &reqwest::Client,
+    bot_token: &str,
+    channel: &str,
+    blocks: &[Block],
+    thread_ts: Option<&str>,
+) -> Result<String> {
+    let blocks = if blocks.len() > MAX_BLOCKS_PER_MESSAGE {
+        let mut truncated = blocks[..MAX_BLOCKS_PER_MESSAGE - 1].to_vec();
+        truncated.push(Block::Section {
+            text: TextObject {
+                kind: "mrkdwn",
+                text: "_Message truncated — too many blocks._".to_string(),
+            },
+        });
+        truncated
+    } else {
+        blocks.to_vec()
+    };
+
+    // Build a fallback plain-text summary from section blocks
+    let fallback: String = blocks
+        .iter()
+        .filter_map(|b| match b {
+            Block::Section { text } => Some(text.text.as_str()),
+            Block::Header { text } => Some(text.text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let mut body = json!({
+        "channel": channel,
+        "blocks": blocks,
+        "text": fallback,
+    });
+
+    if let Some(ts) = thread_ts {
+        body["thread_ts"] = json!(ts);
+    }
+
+    let response = client
+        .post("https://slack.com/api/chat.postMessage")
+        .header("Authorization", format!("Bearer {bot_token}"))
+        .json(&body)
+        .send()
+        .await
+        .context("failed to call chat.postMessage")?;
+
+    let status = response.status();
+    let resp_body: serde_json::Value = response
+        .json()
+        .await
+        .context("failed to parse Slack API response")?;
+
+    if !status.is_success() || resp_body["ok"].as_bool() != Some(true) {
+        let err = resp_body["error"].as_str().unwrap_or("unknown error");
+        anyhow::bail!("chat.postMessage failed ({status}): {err}");
+    }
+
+    resp_body["ts"]
+        .as_str()
+        .map(|s| s.to_string())
+        .context("Slack response missing ts field")
+}
+
+// ---------------------------------------------------------------------------
+// Markdown → Block Kit blocks
+// ---------------------------------------------------------------------------
+
+/// Convert markdown text into Slack Block Kit blocks.
+pub fn markdown_to_blocks(text: &str) -> Vec<Block> {
+    let mut blocks: Vec<Block> = Vec::new();
+    let mut current_lines: Vec<String> = Vec::new();
+
+    for line in text.lines() {
+        let trimmed = line.trim();
+
+        // Horizontal rule → flush + Divider
+        if trimmed == "---" || trimmed == "***" || trimmed == "___" {
+            flush_section(&mut blocks, &mut current_lines);
+            blocks.push(Block::Divider);
+            continue;
+        }
+
+        // Headers → flush + Header block
+        if let Some(header_text) = trimmed
+            .strip_prefix("### ")
+            .or_else(|| trimmed.strip_prefix("## "))
+            .or_else(|| trimmed.strip_prefix("# "))
+        {
+            flush_section(&mut blocks, &mut current_lines);
+            let mut h = header_text.trim().to_string();
+            if h.len() > MAX_HEADER_LEN {
+                let mut end = MAX_HEADER_LEN;
+                while !h.is_char_boundary(end) {
+                    end -= 1;
+                }
+                h.truncate(end);
+            }
+            blocks.push(Block::Header {
+                text: TextObject {
+                    kind: "plain_text",
+                    text: h,
+                },
+            });
+            continue;
+        }
+
+        // Everything else: accumulate as mrkdwn content
+        let converted = if let Some(rest) = trimmed.strip_prefix("- ") {
+            format!("• {rest}")
+        } else if let Some(rest) = trimmed.strip_prefix("* ") {
+            format!("• {rest}")
+        } else {
+            line.to_string()
+        };
+
+        current_lines.push(converted);
+    }
+
+    flush_section(&mut blocks, &mut current_lines);
+    blocks
+}
+
+/// Flush accumulated lines into one or more Section blocks (chunked at 3000 chars).
+fn flush_section(blocks: &mut Vec<Block>, lines: &mut Vec<String>) {
+    if lines.is_empty() {
+        return;
+    }
+
+    let joined = lines.join("\n");
+    lines.clear();
+
+    let formatted = convert_bold(&convert_links(&joined));
+
+    // Chunk at line boundaries to stay under MAX_SECTION_LEN
+    let mut chunk = String::new();
+    for line in formatted.lines() {
+        // +1 for the newline we'd add
+        if !chunk.is_empty() && chunk.len() + 1 + line.len() > MAX_SECTION_LEN {
+            push_section_block(blocks, &chunk);
+            chunk.clear();
+        }
+        if !chunk.is_empty() {
+            chunk.push('\n');
+        }
+        chunk.push_str(line);
+    }
+
+    if !chunk.is_empty() {
+        push_section_block(blocks, &chunk);
+    }
+}
+
+fn push_section_block(blocks: &mut Vec<Block>, text: &str) {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    blocks.push(Block::Section {
+        text: TextObject {
+            kind: "mrkdwn",
+            text: trimmed.to_string(),
+        },
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Markdown → Slack mrkdwn (plain text for webhooks)
+// ---------------------------------------------------------------------------
 
 /// Convert markdown to Slack mrkdwn format.
 fn markdown_to_slack(input: &str) -> String {
@@ -214,5 +456,83 @@ mod tests {
     #[test]
     fn test_passthrough() {
         assert_eq!(markdown_to_slack("plain text"), "plain text");
+    }
+
+    // Block Kit tests
+
+    #[test]
+    fn test_markdown_to_blocks_header() {
+        let blocks = markdown_to_blocks("# My Header\nSome text");
+        assert_eq!(blocks.len(), 2);
+        match &blocks[0] {
+            Block::Header { text } => {
+                assert_eq!(text.kind, "plain_text");
+                assert_eq!(text.text, "My Header");
+            }
+            _ => panic!("expected Header block"),
+        }
+        match &blocks[1] {
+            Block::Section { text } => {
+                assert_eq!(text.kind, "mrkdwn");
+                assert!(text.text.contains("Some text"));
+            }
+            _ => panic!("expected Section block"),
+        }
+    }
+
+    #[test]
+    fn test_markdown_to_blocks_divider() {
+        let blocks = markdown_to_blocks("Above\n---\nBelow");
+        assert!(blocks.len() >= 3);
+        assert!(matches!(blocks[1], Block::Divider));
+    }
+
+    #[test]
+    fn test_markdown_to_blocks_bullets_converted() {
+        let blocks = markdown_to_blocks("- item one\n- item two");
+        match &blocks[0] {
+            Block::Section { text } => {
+                assert!(text.text.contains('•'));
+            }
+            _ => panic!("expected Section"),
+        }
+    }
+
+    #[test]
+    fn test_markdown_to_blocks_links_and_bold() {
+        let blocks = markdown_to_blocks("Check **this** [link](https://example.com)");
+        match &blocks[0] {
+            Block::Section { text } => {
+                assert!(text.text.contains("*this*"));
+                assert!(text.text.contains("<https://example.com|link>"));
+            }
+            _ => panic!("expected Section"),
+        }
+    }
+
+    #[test]
+    fn test_markdown_to_blocks_long_header_truncated() {
+        let long_header = format!("# {}", "A".repeat(200));
+        let blocks = markdown_to_blocks(&long_header);
+        match &blocks[0] {
+            Block::Header { text } => {
+                assert!(text.text.len() <= MAX_HEADER_LEN);
+            }
+            _ => panic!("expected Header"),
+        }
+    }
+
+    #[test]
+    fn test_block_kit_serialization() {
+        let block = Block::Header {
+            text: TextObject {
+                kind: "plain_text",
+                text: "Hello".to_string(),
+            },
+        };
+        let json = serde_json::to_value(&block).unwrap();
+        assert_eq!(json["type"], "header");
+        assert_eq!(json["text"]["type"], "plain_text");
+        assert_eq!(json["text"]["text"], "Hello");
     }
 }

@@ -13,18 +13,35 @@ You're writing a weekly internal engineering changelog for the team. Your audien
 
 ## Output Format
 
-Your response will be posted to Slack. Write in standard markdown (headers, bold, bullets, links). It gets converted automatically.
+Your response will be posted to Slack with Block Kit formatting and threading. Structure your output in two parts separated by `---THREAD---`:
 
-## Dev Changelog, Week of {{timestamp}}
+**Part 1 (above the delimiter):** A short summary posted to the channel.
+- One `#` header with the title
+- 2-4 key bullet points highlighting the most important changes
 
-### [Repo Name]
+**Part 2 (below the delimiter):** Full details posted as a thread reply.
+- Grouped by repo with `##` headers
+- All non-trivial PRs listed
+- Breaking changes and action items called out
+
+### Example structure:
+
+# Dev Changelog, Week of {{timestamp}}
+
+- **[Repo]**: Brief highlight of biggest change
+- **[Repo]**: Brief highlight of biggest change
+- [N] total PRs merged across [M] repos
+
+---THREAD---
+
+## [Repo Name]
 - **PR title** ([#number](url)): one-line summary of what changed and why it matters
 - ...
 
-### [Next Repo]
+## [Next Repo]
 - ...
 
-### Notes
+## Notes
 - [Any cross-repo impacts, breaking changes, or action items]
 
 ---

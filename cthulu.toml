@@ -16,6 +16,9 @@ permissions = ["Bash", "Read", "Grep", "Glob"]
 event = "pull_request"
 repos = [
   { slug = "bitcoin-portal/RustServer", path = "/Users/andrei/Developer/RustServer" },
+  { slug = "bitcoin-portal/OrangeRockIOS", path = "/Users/andrei/Developer/orangerock/OrangeRockIOS" },
+  { slug = "bitcoin-portal/RustMultiplatformCore", path = "/Users/andrei/Developer/orangerock/RustMultiplatformCore" },
+  { slug = "saltyskip/cthulu", path = "/Users/andrei/Developer/orangerock/cthulu" },
 ]
 poll_interval = 60
 skip_drafts = true        # Don't review draft PRs (default: true)

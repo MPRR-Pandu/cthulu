@@ -52,4 +52,6 @@ Your response will be posted to Slack with Block Kit formatting and threading. S
 
 ---
 
+IMPORTANT: Output the changelog directly as your response text. Do NOT use any tools — just write the markdown content as your final answer.
+
 Write the changelog now. Group by repo. Flag anything that needs developer attention.

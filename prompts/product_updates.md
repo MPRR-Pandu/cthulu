@@ -54,4 +54,6 @@ Your response will be posted to Slack with Block Kit formatting and threading. S
 
 ---
 
+IMPORTANT: Output the update directly as your response text. Do NOT use any tools — just write the markdown content as your final answer.
+
 Write the update now. User-facing changes only. Plain language.

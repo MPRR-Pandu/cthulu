@@ -11,7 +11,7 @@ You're writing a weekly internal engineering changelog for the team. Your audien
 - If a PR title is unclear, infer from the body what actually changed
 - Use markdown: `#` for the main title only, `##` for repo group headers, `###` for sub-groups
 - Use `- ` for all bullet points (not `*`)
-- End Part 1 summary with a plain stats line (no bullet/header) like "5 PRs merged across 3 repos"
+- End Part 1 summary with a `[stats]...[/stats]` block (renders as a 2-column stats grid in Slack). Put each stat on its own line, or use `|` to pair stats side-by-side. Use emoji shortcodes for visual flair.
 
 ## Output Format
 
@@ -32,7 +32,12 @@ Your response will be posted to Slack with Block Kit formatting and threading. S
 
 - **[Repo]**: Brief highlight of biggest change
 - **[Repo]**: Brief highlight of biggest change
-- [N] total PRs merged across [M] repos
+
+[stats]
+:git-merge-queue: *[N]* PRs merged | :file_folder: *[N]* files changed
+:heavy_plus_sign: *[N]* lines added | :heavy_minus_sign: *[N]* lines removed
+:busts_in_silhouette: *[N]* contributors | :package: *[M]* repos
+[/stats]
 
 ---THREAD---
 

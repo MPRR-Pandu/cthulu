@@ -11,6 +11,7 @@ use serde_json::json;
 pub enum Block {
     Header { text: TextObject },
     Section { text: TextObject },
+    SectionFields { fields: Vec<TextObject> },
     Context { elements: Vec<ContextElement> },
     RichText { elements: Vec<RichTextElement> },
     Divider,
@@ -29,6 +30,12 @@ impl Serialize for Block {
                 let mut map = serializer.serialize_map(Some(2))?;
                 map.serialize_entry("type", "section")?;
                 map.serialize_entry("text", text)?;
+                map.end()
+            }
+            Block::SectionFields { fields } => {
+                let mut map = serializer.serialize_map(Some(2))?;
+                map.serialize_entry("type", "section")?;
+                map.serialize_entry("fields", fields)?;
                 map.end()
             }
             Block::Context { elements } => {
@@ -306,6 +313,10 @@ async fn post_blocks(
         .iter()
         .filter_map(|b| match b {
             Block::Header { text } | Block::Section { text } => Some(text.text.clone()),
+            Block::SectionFields { fields } => {
+                let parts: Vec<&str> = fields.iter().map(|f| f.text.as_str()).collect();
+                Some(parts.join(" | "))
+            }
             Block::Context { elements } => {
                 let parts: Vec<&str> = elements
                     .iter()
@@ -395,9 +406,30 @@ pub fn markdown_to_blocks(text: &str) -> Vec<Block> {
     let mut blocks: Vec<Block> = Vec::new();
     let mut paragraph_lines: Vec<String> = Vec::new();
     let mut bullet_items: Vec<Vec<RichTextInline>> = Vec::new();
+    let mut stats_lines: Option<Vec<String>> = None;
 
     for line in text.lines() {
         let trimmed = line.trim();
+
+        // [stats] / [/stats] block → SectionFields
+        if trimmed.eq_ignore_ascii_case("[stats]") {
+            flush_paragraph(&mut blocks, &mut paragraph_lines);
+            flush_bullets(&mut blocks, &mut bullet_items);
+            stats_lines = Some(Vec::new());
+            continue;
+        }
+        if trimmed.eq_ignore_ascii_case("[/stats]") {
+            if let Some(lines) = stats_lines.take() {
+                flush_stats_block(&mut blocks, &lines);
+            }
+            continue;
+        }
+        if let Some(ref mut lines) = stats_lines {
+            if !trimmed.is_empty() {
+                lines.push(trimmed.to_string());
+            }
+            continue;
+        }
 
         // Horizontal rule → flush + Divider
         if trimmed == "---" || trimmed == "***" || trimmed == "___" {
@@ -542,6 +574,37 @@ fn flush_bullets(blocks: &mut Vec<Block>, items: &mut Vec<Vec<RichTextInline>>) 
             elements: list_items,
         }],
     });
+}
+
+/// Flush stats lines into a SectionFields block (2-column grid).
+///
+/// Each line becomes one field cell. Lines containing `|` are split into
+/// multiple cells. All cells are mrkdwn so emoji shortcodes render.
+fn flush_stats_block(blocks: &mut Vec<Block>, lines: &[String]) {
+    if lines.is_empty() {
+        return;
+    }
+
+    let mut fields: Vec<TextObject> = Vec::new();
+    for line in lines {
+        if line.contains('|') {
+            for cell in line.split('|') {
+                let cell = cell.trim();
+                if !cell.is_empty() {
+                    fields.push(TextObject { kind: "mrkdwn", text: cell.to_string() });
+                }
+            }
+        } else {
+            fields.push(TextObject { kind: "mrkdwn", text: line.clone() });
+        }
+    }
+
+    // Slack allows max 10 fields per section block
+    for chunk in fields.chunks(10) {
+        blocks.push(Block::SectionFields {
+            fields: chunk.to_vec(),
+        });
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1199,5 +1262,65 @@ mod tests {
         assert_eq!(json["type"], "section");
         assert_eq!(json["text"]["type"], "mrkdwn");
         assert_eq!(json["text"]["text"], "*bold section*");
+    }
+
+    #[test]
+    fn test_stats_block_produces_section_fields() {
+        let md = "Some intro\n\n[stats]\n:rocket: *12* PRs merged | :file_folder: *45* files\n:heavy_plus_sign: *3,450* added | :heavy_minus_sign: *1,200* removed\n[/stats]\n\nAfter stats";
+        let blocks = markdown_to_blocks(md);
+
+        // Find the SectionFields block
+        let sf = blocks.iter().find(|b| matches!(b, Block::SectionFields { .. }));
+        assert!(sf.is_some(), "expected SectionFields block in {:?}", blocks);
+
+        match sf.unwrap() {
+            Block::SectionFields { fields } => {
+                assert_eq!(fields.len(), 4);
+                assert!(fields[0].text.contains("12"));
+                assert!(fields[1].text.contains("45"));
+                assert!(fields[2].text.contains("3,450"));
+                assert!(fields[3].text.contains("1,200"));
+                assert_eq!(fields[0].kind, "mrkdwn");
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn test_stats_block_serialization() {
+        let block = Block::SectionFields {
+            fields: vec![
+                TextObject { kind: "mrkdwn", text: ":rocket: *12* PRs".to_string() },
+                TextObject { kind: "mrkdwn", text: ":file_folder: *45* files".to_string() },
+            ],
+        };
+        let json = serde_json::to_value(&block).unwrap();
+        assert_eq!(json["type"], "section");
+        assert!(json.get("text").is_none(), "SectionFields should not have text key");
+        assert_eq!(json["fields"].as_array().unwrap().len(), 2);
+        assert_eq!(json["fields"][0]["type"], "mrkdwn");
+        assert_eq!(json["fields"][0]["text"], ":rocket: *12* PRs");
+    }
+
+    #[test]
+    fn test_stats_block_single_column_lines() {
+        let md = "[stats]\n:rocket: *12* PRs merged\n:file_folder: *45* files changed\n[/stats]";
+        let blocks = markdown_to_blocks(md);
+        match &blocks[0] {
+            Block::SectionFields { fields } => {
+                assert_eq!(fields.len(), 2);
+            }
+            _ => panic!("expected SectionFields, got {:?}", blocks[0]),
+        }
+    }
+
+    #[test]
+    fn test_stats_block_surrounded_by_content() {
+        let md = "# Changelog\n\n- highlight one\n- highlight two\n\n[stats]\n:rocket: *5* merged | :package: *2* repos\n[/stats]";
+        let blocks = markdown_to_blocks(md);
+
+        assert!(matches!(&blocks[0], Block::Header { .. }));
+        assert!(matches!(&blocks[1], Block::RichText { .. }));
+        assert!(matches!(&blocks[2], Block::SectionFields { .. }));
     }
 }

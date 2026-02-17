@@ -1,17 +1,9 @@
 pub mod slack;
 
 use anyhow::Result;
+use async_trait::async_trait;
 
-use crate::config::SinkConfig;
-
-pub async fn deliver(
-    sink: &SinkConfig,
-    text: &str,
-    http_client: &reqwest::Client,
-) -> Result<()> {
-    match sink {
-        SinkConfig::Slack { webhook_url_env } => {
-            slack::post_message(http_client, webhook_url_env, text).await
-        }
-    }
+#[async_trait]
+pub trait Sink: Send + Sync {
+    async fn deliver(&self, text: &str) -> Result<()>;
 }

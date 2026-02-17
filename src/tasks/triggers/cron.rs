@@ -9,20 +9,17 @@ use croner::Cron;
 use crate::config::{SinkConfig, SourceConfig};
 use crate::tasks::context::render_prompt;
 use crate::tasks::executors::Executor;
-use crate::tasks::sinks;
+use crate::tasks::sinks::Sink;
+use crate::tasks::sinks::slack::{SlackApiSink, SlackWebhookSink};
 use crate::tasks::sources::{self, ContentItem};
 
 pub struct CronTrigger {
     cron: Cron,
     sources: Vec<SourceConfig>,
-    sink: Option<ResolvedSink>,
+    sink: Option<Arc<dyn Sink>>,
     working_dir: PathBuf,
     http_client: Arc<reqwest::Client>,
     github_token: Option<String>,
-}
-
-enum ResolvedSink {
-    Slack { webhook_url: String },
 }
 
 impl CronTrigger {
@@ -38,13 +35,36 @@ impl CronTrigger {
             .parse()
             .map_err(|e| anyhow::anyhow!("invalid cron expression '{}': {}", schedule, e))?;
 
-        // Resolve sink env var at startup so we fail fast
-        let resolved_sink = match sink {
-            Some(SinkConfig::Slack { webhook_url_env }) => {
-                let webhook_url = std::env::var(&webhook_url_env).with_context(|| {
-                    format!("sink requires env var {webhook_url_env} but it is not set")
-                })?;
-                Some(ResolvedSink::Slack { webhook_url })
+        // Resolve sink env vars at startup so we fail fast
+        let resolved_sink: Option<Arc<dyn Sink>> = match sink {
+            Some(SinkConfig::Slack {
+                webhook_url_env,
+                bot_token_env,
+                channel,
+            }) => {
+                if let Some(token_env) = bot_token_env {
+                    let bot_token = std::env::var(&token_env).with_context(|| {
+                        format!("sink requires env var {token_env} but it is not set")
+                    })?;
+                    let channel = channel.with_context(|| {
+                        "slack bot_token_env requires a channel to be set"
+                    })?;
+                    Some(Arc::new(SlackApiSink::new(
+                        Arc::clone(&http_client),
+                        bot_token,
+                        channel,
+                    )))
+                } else if let Some(webhook_env) = webhook_url_env {
+                    let webhook_url = std::env::var(&webhook_env).with_context(|| {
+                        format!("sink requires env var {webhook_env} but it is not set")
+                    })?;
+                    Some(Arc::new(SlackWebhookSink::new(
+                        Arc::clone(&http_client),
+                        webhook_url,
+                    )))
+                } else {
+                    anyhow::bail!("slack sink requires either webhook_url_env or bot_token_env");
+                }
             }
             None => None,
         };
@@ -141,13 +161,9 @@ impl CronTrigger {
         // 5. Deliver to sink if configured
         if let Some(sink) = &self.sink {
             if !exec_result.text.is_empty() {
-                match sink {
-                    ResolvedSink::Slack { webhook_url } => {
-                        sinks::slack::post_to_url(&self.http_client, webhook_url, &exec_result.text)
-                            .await
-                            .context("failed to deliver to Slack")?;
-                    }
-                }
+                sink.deliver(&exec_result.text)
+                    .await
+                    .context("failed to deliver to sink")?;
             } else {
                 tracing::warn!(task = %task_name, "Executor returned empty text, skipping sink delivery");
             }

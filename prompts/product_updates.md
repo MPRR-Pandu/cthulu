@@ -11,18 +11,52 @@ You're writing a weekly product update for stakeholders. Your audience is non-en
 - Do NOT group by repo. PRs come from multiple repos that are all part of the same product. Group by theme or feature area instead (e.g. "Trading", "Wallet", "Performance").
 - If nothing user-facing shipped this week, say so clearly
 - Keep it brief. 3-8 bullet points max.
+- Use `#` for the main title only, `##` for section headers, `###` for feature area sub-groups
+- Use `- ` for all bullet points (not `*`)
+- End Part 1 summary with a plain stats line (no bullet/header) like "8 user-facing improvements shipped this week"
 
 ## Output Format
 
-Your response will be posted to Slack. Write in standard markdown (headers, bold, bullets, links). It gets converted automatically.
+Your response will be posted to Slack with Block Kit formatting and threading. Structure your output in two parts separated by `---THREAD---`:
 
-## Product Updates, Week of {{timestamp}}
+**Part 1 (above the delimiter):** A short summary posted to the channel.
+- One `#` header with the title
+- 2-4 key bullet points highlighting the most impactful user-facing changes
 
-### What Shipped
+**Part 2 (below the delimiter):** Full details posted as a thread reply.
+- Grouped by feature area with `###` headers
+- Use `---` dividers between each feature area for clean visual separation
+- All user-facing changes with context
+
+### Example structure:
+
+# What Shipped This Week
+
+- **Trading**: Brief highlight of biggest user-facing change
+- **Wallet**: Brief highlight
+
+[N] user-facing improvements shipped this week
+
+---THREAD---
+
+### Trading
 - **Feature/fix name**: What changed from the user's perspective and why it matters
 - ...
 
-### Coming Soon
+---
+
+### Wallet
+- **Feature/fix name**: What changed from the user's perspective and why it matters
+- ...
+
+---
+
+### Performance
+- **Improvement**: What users will notice
+
+---
+
+## Coming Soon
 - [Optional: 1-2 things in progress based on open PRs or patterns you notice]
 
 ---
@@ -32,5 +66,7 @@ Your response will be posted to Slack. Write in standard markdown (headers, bold
 {{content}}
 
 ---
+
+IMPORTANT: Output the update directly as your response text. Do NOT use any tools — just write the markdown content as your final answer.
 
 Write the update now. User-facing changes only. Plain language.

@@ -140,7 +140,11 @@ fn default_since_days() -> u64 {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum SinkConfig {
-    Slack { webhook_url_env: String },
+    Slack {
+        webhook_url_env: Option<String>,
+        bot_token_env: Option<String>,
+        channel: Option<String>,
+    },
 }
 
 impl Config {
@@ -422,8 +426,10 @@ mod tests {
             _ => panic!("expected Rss source"),
         }
         match task.sink.as_ref().unwrap() {
-            SinkConfig::Slack { webhook_url_env } => {
-                assert_eq!(webhook_url_env, "SLACK_WEBHOOK_URL");
+            SinkConfig::Slack { webhook_url_env, bot_token_env, channel } => {
+                assert_eq!(webhook_url_env.as_deref(), Some("SLACK_WEBHOOK_URL"));
+                assert!(bot_token_env.is_none());
+                assert!(channel.is_none());
             }
         }
     }
@@ -484,6 +490,34 @@ mod tests {
                 assert_eq!(*since_days, 14);
             }
             _ => panic!("expected GithubMergedPrs source"),
+        }
+    }
+
+    #[test]
+    fn test_slack_bot_token_sink() {
+        let config = parse(r##"
+            [server]
+
+            [[tasks]]
+            name = "dev-changelog"
+            executor = "claude-code"
+            prompt = "prompts/dev_changelog.md"
+
+            [tasks.trigger.cron]
+            schedule = "0 9 * * MON"
+
+            [tasks.sink]
+            type = "slack"
+            bot_token_env = "SLACK_BOT_TOKEN"
+            channel = "#dev-updates"
+        "##);
+        let task = &config.tasks[0];
+        match task.sink.as_ref().unwrap() {
+            SinkConfig::Slack { webhook_url_env, bot_token_env, channel } => {
+                assert!(webhook_url_env.is_none());
+                assert_eq!(bot_token_env.as_deref(), Some("SLACK_BOT_TOKEN"));
+                assert_eq!(channel.as_deref(), Some("#dev-updates"));
+            }
         }
     }
 

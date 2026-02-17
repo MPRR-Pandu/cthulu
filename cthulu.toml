@@ -83,7 +83,8 @@ since_days = 7
 
 [tasks.sink]
 type = "slack"
-webhook_url_env = "SLACK_DEV_WEBHOOK_URL"
+bot_token_env = "SLACK_BOT_TOKEN"
+channel = "#dev-updates"
 
 [[tasks]]
 name = "product-updates"
@@ -106,4 +107,5 @@ since_days = 7
 
 [tasks.sink]
 type = "slack"
-webhook_url_env = "SLACK_PRODUCT_WEBHOOK_URL"
+bot_token_env = "SLACK_BOT_TOKEN"
+channel = "#product-updates"

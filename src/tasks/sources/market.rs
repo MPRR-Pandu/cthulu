@@ -74,19 +74,7 @@ pub async fn fetch_market_snapshot(client: &reqwest::Client) -> Result<String> {
 
     let mut lines = Vec::new();
 
-    // Fear & Greed callouts — each index gets its own line with a progress bar
-    match cnn_result {
-        Ok((score, rating)) => {
-            let bar = progress_bar(score);
-            let color = score_color(score);
-            lines.push(format!(
-                "> 😱 **CNN Fear & Greed** {bar} {{{color}:{score:.0} — {rating}}}"
-            ));
-        }
-        Err(e) => {
-            tracing::warn!(error = %e, "CNN Fear & Greed fetch failed");
-        }
-    }
+    // Fear & Greed callouts — crypto first, then US Markets
     match crypto_fng_result {
         Ok((value, classification)) => {
             let score: f64 = value.parse().unwrap_or(50.0);
@@ -98,6 +86,18 @@ pub async fn fetch_market_snapshot(client: &reqwest::Client) -> Result<String> {
         }
         Err(e) => {
             tracing::warn!(error = %e, "Crypto Fear & Greed fetch failed");
+        }
+    }
+    match cnn_result {
+        Ok((score, rating)) => {
+            let bar = progress_bar(score);
+            let color = score_color(score);
+            lines.push(format!(
+                "> 😱 **US Markets Fear & Greed** {bar} {{{color}:{score:.0} — {rating}}}"
+            ));
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "CNN Fear & Greed fetch failed");
         }
     }
 

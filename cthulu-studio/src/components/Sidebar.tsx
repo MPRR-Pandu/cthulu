@@ -2,7 +2,7 @@ import type { NodeTypeSchema } from "../types/flow";
 
 interface SidebarProps {
   nodeTypes: NodeTypeSchema[];
-  onDragStart: (event: React.DragEvent, nodeType: NodeTypeSchema) => void;
+  onGrab: (nodeType: NodeTypeSchema) => void;
 }
 
 const typeColors: Record<string, string> = {
@@ -12,7 +12,7 @@ const typeColors: Record<string, string> = {
   sink: "var(--sink-color)",
 };
 
-export default function Sidebar({ nodeTypes, onDragStart }: SidebarProps) {
+export default function Sidebar({ nodeTypes, onGrab }: SidebarProps) {
   const grouped = {
     trigger: nodeTypes.filter((n) => n.node_type === "trigger"),
     source: nodeTypes.filter((n) => n.node_type === "source"),
@@ -29,8 +29,10 @@ export default function Sidebar({ nodeTypes, onDragStart }: SidebarProps) {
             <div
               key={nt.kind}
               className="palette-item"
-              draggable
-              onDragStart={(e) => onDragStart(e, nt)}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                onGrab(nt);
+              }}
             >
               <div
                 className="palette-dot"

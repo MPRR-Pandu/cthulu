@@ -443,6 +443,16 @@ button:disabled {
   stroke-width: 2 !important;
 }
 
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: var(--accent) !important;
+  stroke-width: 3 !important;
+}
+
+.react-flow__node.selected .custom-node {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
 .react-flow__handle {
   width: 8px !important;
   height: 8px !important;
@@ -590,6 +600,27 @@ button:disabled {
   font-size: 11px;
 }
 
+.console-search {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: var(--text);
+  width: 140px;
+  font-family: inherit;
+}
+
+.console-search:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.console-search::placeholder {
+  color: var(--text-secondary);
+  opacity: 0.6;
+}
+
 .console-body {
   flex: 1;
   overflow-y: auto;
@@ -658,4 +689,19 @@ button:disabled {
 
 .app-with-console .app-layout {
   height: calc(100vh - 48px - 280px);
+}
+
+/* Drag ghost */
+.drag-ghost {
+  position: fixed;
+  pointer-events: none;
+  z-index: 9999;
+  background: var(--bg-secondary);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--text);
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
 }

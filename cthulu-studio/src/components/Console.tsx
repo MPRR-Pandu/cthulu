@@ -22,6 +22,7 @@ interface ConsoleProps {
 export default function Console({ onClose }: ConsoleProps) {
   const [entries, setEntries] = useState<LogEntry[]>(getEntries());
   const [filter, setFilter] = useState<LogLevel | "all">("all");
+  const [search, setSearch] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
 
@@ -37,8 +38,17 @@ export default function Console({ onClose }: ConsoleProps) {
     }
   }, [entries, autoScroll]);
 
-  const filtered =
-    filter === "all" ? entries : entries.filter((e) => e.level === filter);
+  const filtered = entries.filter((e) => {
+    if (filter !== "all" && e.level !== filter) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      return (
+        e.message.toLowerCase().includes(q) ||
+        (e.detail && e.detail.toLowerCase().includes(q))
+      );
+    }
+    return true;
+  });
 
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const el = e.currentTarget;
@@ -66,6 +76,13 @@ export default function Console({ onClose }: ConsoleProps) {
             </button>
           ))}
         </div>
+        <input
+          className="console-search"
+          type="text"
+          placeholder="Filter..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
         <div className="spacer" />
         <button className="ghost console-btn" onClick={() => clearEntries()}>
           Clear

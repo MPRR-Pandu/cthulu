@@ -61,6 +61,59 @@ function DemoNode({
   );
 }
 
+function DemoNodeVertical({
+  data,
+}: {
+  data: { label: string; type: string; icon: string };
+}) {
+  const color = nodeColors[data.type] || "#8b949e";
+
+  return (
+    <>
+      {data.type !== "trigger" && (
+        <Handle
+          type="target"
+          position={Position.Top}
+          id="in-top"
+          style={{ background: color, border: "none", width: 8, height: 8 }}
+        />
+      )}
+      <div
+        className="rounded-lg border px-3 py-2"
+        style={{
+          background: "#161b22",
+          borderColor: "#30363d",
+          width: 140,
+        }}
+      >
+        <div className="flex items-center gap-2">
+          <span
+            className="rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase"
+            style={{ background: color + "22", color }}
+          >
+            {data.type}
+          </span>
+        </div>
+        <div className="mt-1 flex items-center gap-2">
+          <span className="text-sm">{data.icon}</span>
+          <span className="text-xs font-medium text-[#e6edf3]">
+            {data.label}
+          </span>
+        </div>
+      </div>
+      {data.type !== "sink" && (
+        <Handle
+          type="source"
+          position={Position.Bottom}
+          id="out-bottom"
+          style={{ background: color, border: "none", width: 8, height: 8 }}
+        />
+      )}
+    </>
+  );
+}
+
 export const demoNodeTypes = {
   demo: DemoNode,
+  demoVertical: DemoNodeVertical,
 };

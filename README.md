@@ -1,10 +1,10 @@
 # Cthulu
 
-Cron for Claude Code. A config-driven task runner that delegates to Claude Code for automated PR reviews, news monitoring, changelogs, and more.
+An AI-powered flow runner that delegates to Claude Code for automated PR reviews, news monitoring, changelogs, and more.
 
 ## How It Works
 
-Cthulu runs pipelines defined in `cthulu.toml`:
+Cthulu runs visual pipelines (flows) built in Studio or via the REST API:
 
 ```
 Trigger → Sources → Filters → Executor (Claude Code) → Sinks
@@ -26,7 +26,7 @@ Trigger → Sources → Filters → Executor (Claude Code) → Sinks
 
 ```bash
 # Clone and build
-git clone git@github.com:saltyskip/cthulu.git
+git clone <repo-url>
 cd cthulu
 cargo build --release
 
@@ -34,20 +34,21 @@ cargo build --release
 cp .env.example .env
 # Edit .env with your API keys (see Environment Variables below)
 
-# Create your config (or use the example)
-cp examples/crypto_news.toml cthulu.toml
-
 # Run
 cargo run
 ```
 
-The server starts on `http://localhost:8081`.
+The server starts on `http://localhost:8081`. Use Studio or the REST API to create and manage flows.
 
 ## Environment Variables
 
 Create a `.env` file in the project root:
 
 ```bash
+# Server
+PORT=8081
+ENVIRONMENT=local
+
 # GitHub token (required for PR review trigger and merged PRs source)
 GITHUB_TOKEN=ghp_...
 
@@ -63,55 +64,19 @@ SENTRY_DSN=https://...@sentry.io/...
 RUST_LOG=cthulu=info   # debug for verbose output
 ```
 
-The env var names in your `.env` must match the `*_env` fields in your `cthulu.toml` sink configs. For example, if your Notion sink has `token_env = "NOTION_TOKEN"`, you need `NOTION_TOKEN=...` in `.env`.
+## Flows
 
-## Configuration
+Flows are the core unit of work. Each flow is a directed graph of nodes:
 
-Cthulu is configured via `cthulu.toml`. Here's a minimal example:
+### Node Types
 
-```toml
-[server]
-port = 8081
-
-[[tasks]]
-name = "news-brief"
-executor = "claude-code"
-prompt = "prompts/my_prompt.md"
-permissions = []          # empty = all permissions
-
-[tasks.trigger.cron]
-schedule = "0 */4 * * *"  # every 4 hours
-
-[[tasks.sources]]
-type = "rss"
-url = "https://example.com/feed"
-limit = 10
-
-[[tasks.sinks]]
-type = "notion"
-token_env = "NOTION_TOKEN"
-database_id = "your-notion-database-id"
-```
-
-### Triggers
-
-**Cron** — standard 5-field cron expressions:
-```toml
-[tasks.trigger.cron]
-schedule = "0 */4 * * *"
-```
-
-**GitHub PR** — polls for new/updated PRs:
-```toml
-[tasks.trigger.github]
-event = "pull_request"
-repos = [
-  { slug = "owner/repo", path = "/local/path/to/repo" },
-]
-poll_interval = 60
-skip_drafts = true
-review_on_push = true
-```
+| Type | Kinds | Description |
+|------|-------|-------------|
+| **Trigger** | `cron`, `github-pr`, `webhook`, `manual` | What starts the flow |
+| **Source** | `rss`, `web-scrape`, `web-scraper`, `github-merged-prs` | Where data comes from |
+| **Filter** | `keyword` | Filters items before execution |
+| **Executor** | `claude-code`, `claude-api` | AI that processes the data |
+| **Sink** | `slack`, `notion` | Where results are delivered |
 
 ### Sources
 
@@ -214,18 +179,17 @@ flow_run{flow=news-brief run=ba4fa70b}
 ```
 cthulu/
 ├── src/
-│   ├── config.rs          # TOML config parsing
-│   ├── flows/             # Flow model, runner, storage, history
+│   ├── config.rs          # Env-based configuration
+│   ├── flows/             # Flow model, runner, storage, scheduler, history
 │   ├── github/            # GitHub API client
 │   ├── server/            # Axum HTTP server + API routes
 │   └── tasks/
 │       ├── sources/       # RSS, web scrape, GitHub PRs, market data
 │       ├── filters/       # Keyword filter
 │       ├── executors/     # Claude Code executor
-│       ├── sinks/         # Slack, Notion
-│       └── triggers/      # Cron, GitHub PR polling
+│       └── sinks/         # Slack, Notion
 ├── cthulu-studio/         # Tauri + React Flow desktop app
+├── cthulu-site/           # Marketing site (Next.js)
 ├── prompts/               # Prompt templates
-├── examples/              # Example configs
-└── cthulu.toml            # Your task configuration
+└── examples/              # Sample flow JSON + TOML for reference
 ```

@@ -6,7 +6,7 @@ You are a senior code reviewer performing a focused PR review. You will review t
 
 1. Read the PR diff provided below carefully
 2. Read the changed files in full for context (use the Read tool)
-3. If needed, identify integration points with other repos like RustMultiplatformCore, OrangeRockIOS, or RustServer. You may scan for local files or remote commits to ascertain changes, but keep it focused.
+3. If needed, identify integration points with other repos in the project. You may scan for local files or remote commits to ascertain changes, but keep it focused.
 4. Identify bugs, security issues, logic errors, performance concerns, and design problems
 5. Post your review to GitHub using `gh` (see Posting section below)
 

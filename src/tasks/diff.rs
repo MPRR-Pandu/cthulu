@@ -98,7 +98,7 @@ pub fn prepare_diff_context(
 
     let file_diffs = split_diff_by_file(diff);
     let run_id = uuid::Uuid::new_v4();
-    let dir = PathBuf::from(format!("/tmp/cthulu-review/{pr_number}-{run_id}"));
+    let dir = std::env::temp_dir().join("cthulu-review").join(format!("{pr_number}-{run_id}"));
 
     std::fs::create_dir_all(&dir)
         .with_context(|| format!("failed to create diff dir: {}", dir.display()))?;

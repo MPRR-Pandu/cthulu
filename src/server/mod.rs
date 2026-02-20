@@ -11,7 +11,6 @@ use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub config: Arc<crate::config::Config>,
     pub github_client: Option<Arc<dyn GithubClient>>,
     pub http_client: Arc<reqwest::Client>,
     pub store: Arc<dyn Store>,

@@ -7,7 +7,7 @@ const terminalOutputs = [
     title: "claude — pr-review",
     lines: [
       { text: "$ claude --allowedTools Read,Grep,Bash", color: "#3fb950" },
-      { text: "Cloning bitcoin-portal/RustServer...", color: "#8b949e" },
+      { text: "Cloning acme-corp/api-server...", color: "#8b949e" },
       { text: "Reading src/handlers/auth.rs...", color: "#8b949e" },
       { text: "⠋ Analyzing PR #142 diff...", color: "#58a6ff" },
       { text: "Found 3 issues in auth middleware", color: "#d29922" },
@@ -44,7 +44,7 @@ const terminalOutputs = [
       { text: "⠋ Categorizing changes...", color: "#58a6ff" },
       { text: "3 features, 7 fixes, 2 chores", color: "#d29922" },
       { text: "Formatting Slack blocks...", color: "#8b949e" },
-      { text: "Posted to #the-ark", color: "#bc8cff" },
+      { text: "Posted to #dev-updates", color: "#bc8cff" },
       { text: "✓ Changelog delivered", color: "#3fb950" },
     ],
     x: 0,

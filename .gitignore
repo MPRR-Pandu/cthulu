@@ -2,3 +2,4 @@
 .env
 *.p8
 .DS_STORE
+.personal/

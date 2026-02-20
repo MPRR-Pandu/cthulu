@@ -793,3 +793,110 @@ button:disabled {
   white-space: nowrap;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
 }
+
+/* ── Node validation badge ── */
+.node-validation-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--danger);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  flex-shrink: 0;
+  cursor: default;
+}
+
+/* ── Field-level validation errors ── */
+.field-error {
+  display: block;
+  color: var(--danger);
+  font-size: 11px;
+  margin-top: 4px;
+}
+
+.input-error {
+  border-color: var(--danger) !important;
+}
+
+/* ── Validation summary in PropertyPanel ── */
+.validation-summary {
+  background: rgba(248, 81, 73, 0.1);
+  border: 1px solid var(--danger);
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: var(--danger);
+  line-height: 1.5;
+}
+
+/* ── Validation gate overlay ── */
+.validation-gate-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.validation-gate {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  width: 440px;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.validation-gate-header {
+  padding: 16px 20px;
+  font-size: 15px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+  color: var(--danger);
+}
+
+.validation-gate-body {
+  padding: 12px 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.validation-gate-node {
+  margin-bottom: 12px;
+}
+
+.validation-gate-node strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.validation-gate-kind {
+  color: var(--text-secondary);
+  font-size: 11px;
+  margin-left: 6px;
+}
+
+.validation-gate-node ul {
+  margin: 4px 0 0 16px;
+  list-style: disc;
+  font-size: 12px;
+  color: var(--danger);
+}
+
+.validation-gate-footer {
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

@@ -5,11 +5,13 @@ import type { CanvasHandle } from "./Canvas";
 interface PropertyPanelProps {
   canvasRef: RefObject<CanvasHandle | null>;
   selectedNodeId: string | null;
+  nodeValidationErrors?: Record<string, string[]>;
 }
 
 export default function PropertyPanel({
   canvasRef,
   selectedNodeId,
+  nodeValidationErrors,
 }: PropertyPanelProps) {
   const [node, setNode] = useState<FlowNode | null>(null);
   const [config, setConfig] = useState<Record<string, unknown>>({});
@@ -50,6 +52,8 @@ export default function PropertyPanel({
     canvasRef.current?.deleteNode(node.id);
   };
 
+  const errors = node ? (nodeValidationErrors?.[node.id] ?? []) : [];
+
   return (
     <div className="property-panel">
       <h3>
@@ -59,6 +63,14 @@ export default function PropertyPanel({
         {node.kind}
       </h3>
 
+      {errors.length > 0 && (
+        <div className="validation-summary">
+          {errors.map((err, i) => (
+            <div key={i}>{err}</div>
+          ))}
+        </div>
+      )}
+
       <div className="form-group">
         <label>Label</label>
         <input
@@ -67,7 +79,7 @@ export default function PropertyPanel({
         />
       </div>
 
-      {renderConfigFields(node, config, handleConfigChange)}
+      {renderConfigFields(node, config, handleConfigChange, errors)}
 
       <div style={{ marginTop: 24 }}>
         <button className="danger" onClick={handleDelete}>
@@ -78,22 +90,30 @@ export default function PropertyPanel({
   );
 }
 
+function fieldHasError(errors: string[], keyword: string): string | undefined {
+  return errors.find((e) => e.toLowerCase().includes(keyword.toLowerCase()));
+}
+
 function renderConfigFields(
   node: FlowNode,
   config: Record<string, unknown>,
-  onChange: (key: string, value: unknown) => void
+  onChange: (key: string, value: unknown) => void,
+  errors: string[] = []
 ) {
   switch (node.kind) {
-    case "cron":
+    case "cron": {
+      const scheduleErr = fieldHasError(errors, "schedule");
       return (
         <>
           <div className="form-group">
             <label>Schedule (cron)</label>
             <input
+              className={scheduleErr ? "input-error" : ""}
               value={(config.schedule as string) || ""}
               onChange={(e) => onChange("schedule", e.target.value)}
               placeholder="0 */4 * * *"
             />
+            {scheduleErr && <span className="field-error">{scheduleErr}</span>}
           </div>
           <div className="form-group">
             <label>Working Directory</label>
@@ -104,16 +124,20 @@ function renderConfigFields(
           </div>
         </>
       );
-    case "rss":
+    }
+    case "rss": {
+      const urlErr = fieldHasError(errors, "feed url");
       return (
         <>
           <div className="form-group">
             <label>Feed URL</label>
             <input
+              className={urlErr ? "input-error" : ""}
               value={(config.url as string) || ""}
               onChange={(e) => onChange("url", e.target.value)}
               placeholder="https://example.com/feed"
             />
+            {urlErr && <span className="field-error">{urlErr}</span>}
           </div>
           <div className="form-group">
             <label>Limit</label>
@@ -142,12 +166,15 @@ function renderConfigFields(
           </div>
         </>
       );
-    case "github-merged-prs":
+    }
+    case "github-merged-prs": {
+      const reposErr = fieldHasError(errors, "repos");
       return (
         <>
           <div className="form-group">
             <label>Repos (comma separated)</label>
             <input
+              className={reposErr ? "input-error" : ""}
               value={
                 Array.isArray(config.repos)
                   ? (config.repos as string[]).join(", ")
@@ -161,6 +188,7 @@ function renderConfigFields(
               }
               placeholder="owner/repo-a, owner/repo-b"
             />
+            {reposErr && <span className="field-error">{reposErr}</span>}
           </div>
           <div className="form-group">
             <label>Since Days</label>
@@ -174,16 +202,20 @@ function renderConfigFields(
           </div>
         </>
       );
-    case "claude-code":
+    }
+    case "claude-code": {
+      const promptErr = fieldHasError(errors, "prompt");
       return (
         <>
           <div className="form-group">
             <label>Prompt (file path or inline)</label>
             <textarea
+              className={promptErr ? "input-error" : ""}
               value={(config.prompt as string) || ""}
               onChange={(e) => onChange("prompt", e.target.value)}
               placeholder="prompts/my_prompt.md"
             />
+            {promptErr && <span className="field-error">{promptErr}</span>}
           </div>
           <div className="form-group">
             <label>Permissions (comma separated)</label>
@@ -218,16 +250,20 @@ function renderConfigFields(
           </div>
         </>
       );
-    case "web-scrape":
+    }
+    case "web-scrape": {
+      const urlErr = fieldHasError(errors, "page url");
       return (
         <>
           <div className="form-group">
             <label>Page URL</label>
             <input
+              className={urlErr ? "input-error" : ""}
               value={(config.url as string) || ""}
               onChange={(e) => onChange("url", e.target.value)}
               placeholder="https://example.gov/news"
             />
+            {urlErr && <span className="field-error">{urlErr}</span>}
           </div>
           <div className="form-group">
             <label>Keywords (comma separated)</label>
@@ -248,16 +284,21 @@ function renderConfigFields(
           </div>
         </>
       );
-    case "web-scraper":
+    }
+    case "web-scraper": {
+      const urlErr = fieldHasError(errors, "page url");
+      const selectorErr = fieldHasError(errors, "items selector");
       return (
         <>
           <div className="form-group">
             <label>Page URL</label>
             <input
+              className={urlErr ? "input-error" : ""}
               value={(config.url as string) || ""}
               onChange={(e) => onChange("url", e.target.value)}
               placeholder="https://www.sec.gov/news/pressreleases"
             />
+            {urlErr && <span className="field-error">{urlErr}</span>}
           </div>
           <div className="form-group">
             <label>Base URL</label>
@@ -270,10 +311,12 @@ function renderConfigFields(
           <div className="form-group">
             <label>Items Selector</label>
             <input
+              className={selectorErr ? "input-error" : ""}
               value={(config.items_selector as string) || ""}
               onChange={(e) => onChange("items_selector", e.target.value)}
               placeholder="div.press-release"
             />
+            {selectorErr && <span className="field-error">{selectorErr}</span>}
           </div>
           <div className="form-group">
             <label>Title Selector</label>
@@ -309,12 +352,15 @@ function renderConfigFields(
           </div>
         </>
       );
-    case "keyword":
+    }
+    case "keyword": {
+      const kwErr = fieldHasError(errors, "keywords");
       return (
         <>
           <div className="form-group">
             <label>Keywords (comma separated)</label>
             <input
+              className={kwErr ? "input-error" : ""}
               value={
                 Array.isArray(config.keywords)
                   ? (config.keywords as string[]).join(", ")
@@ -328,6 +374,7 @@ function renderConfigFields(
               }
               placeholder="bitcoin, crypto, sec, etf"
             />
+            {kwErr && <span className="field-error">{kwErr}</span>}
           </div>
           <div className="form-group">
             <label>Require All</label>
@@ -352,12 +399,15 @@ function renderConfigFields(
           </div>
         </>
       );
-    case "slack":
+    }
+    case "slack": {
+      const slackErr = fieldHasError(errors, "webhook url or bot token");
       return (
         <>
           <div className="form-group">
             <label>Webhook URL Env</label>
             <input
+              className={slackErr ? "input-error" : ""}
               value={(config.webhook_url_env as string) || ""}
               onChange={(e) => onChange("webhook_url_env", e.target.value || null)}
               placeholder="SLACK_WEBHOOK_URL"
@@ -366,10 +416,12 @@ function renderConfigFields(
           <div className="form-group">
             <label>Bot Token Env</label>
             <input
+              className={slackErr ? "input-error" : ""}
               value={(config.bot_token_env as string) || ""}
               onChange={(e) => onChange("bot_token_env", e.target.value || null)}
               placeholder="SLACK_BOT_TOKEN"
             />
+            {slackErr && <span className="field-error">{slackErr}</span>}
           </div>
           <div className="form-group">
             <label>Channel</label>
@@ -381,26 +433,34 @@ function renderConfigFields(
           </div>
         </>
       );
-    case "notion":
+    }
+    case "notion": {
+      const tokenErr = fieldHasError(errors, "token env");
+      const dbErr = fieldHasError(errors, "database id");
       return (
         <>
           <div className="form-group">
             <label>Token Env</label>
             <input
+              className={tokenErr ? "input-error" : ""}
               value={(config.token_env as string) || ""}
               onChange={(e) => onChange("token_env", e.target.value)}
               placeholder="NOTION_TOKEN"
             />
+            {tokenErr && <span className="field-error">{tokenErr}</span>}
           </div>
           <div className="form-group">
             <label>Database ID</label>
             <input
+              className={dbErr ? "input-error" : ""}
               value={(config.database_id as string) || ""}
               onChange={(e) => onChange("database_id", e.target.value)}
             />
+            {dbErr && <span className="field-error">{dbErr}</span>}
           </div>
         </>
       );
+    }
     case "github-pr":
       return (
         <>

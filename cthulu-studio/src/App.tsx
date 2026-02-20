@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import * as api from "./api/client";
 import { log, getEntries, subscribe } from "./api/logger";
 import { subscribeToRuns } from "./api/runStream";
 import type { Flow, FlowNode, FlowEdge, FlowSummary, NodeTypeSchema, RunEvent } from "./types/flow";
+import { validateFlow } from "./utils/validateNode";
 import TopBar from "./components/TopBar";
 import FlowList from "./components/FlowList";
 import Sidebar from "./components/Sidebar";
@@ -30,6 +31,17 @@ export default function App() {
   const [activeFlowMeta, setActiveFlowMeta] = useState<{ id: string; name: string; description: string; enabled: boolean } | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const canvasRef = useRef<CanvasHandle>(null);
+
+  // --- Validation state ---
+  const latestSnapshotRef = useRef<{ nodes: FlowNode[]; edges: FlowEdge[] } | null>(null);
+  const [snapshotVersion, setSnapshotVersion] = useState(0);
+
+  const nodeValidationErrors = useMemo(() => {
+    // snapshotVersion used as dependency trigger
+    void snapshotVersion;
+    return latestSnapshotRef.current ? validateFlow(latestSnapshotRef.current.nodes) : {};
+  }, [snapshotVersion]);
+  const flowHasErrors = Object.keys(nodeValidationErrors).length > 0;
 
   // --- Drag-and-drop state (refs to avoid re-renders during drag) ---
   const dragging = useRef<NodeTypeSchema | null>(null);
@@ -168,6 +180,8 @@ export default function App() {
 
   // --- Snapshot callback: Canvas pushes state here for persistence ---
   const handleFlowSnapshot = useCallback((snapshot: { nodes: FlowNode[]; edges: FlowEdge[] }) => {
+    latestSnapshotRef.current = snapshot;
+    setSnapshotVersion((v) => v + 1);
     if (!activeFlowId || !activeFlowMeta) return;
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(async () => {
@@ -238,6 +252,9 @@ export default function App() {
         runLogOpen={showRunLog}
         onToggleRunLog={() => setShowRunLog((v) => !v)}
         errorCount={errorCount}
+        flowHasErrors={flowHasErrors}
+        validationErrors={nodeValidationErrors}
+        flowNodes={latestSnapshotRef.current?.nodes ?? []}
       />
       <div className="app-layout">
         <div style={{ display: "flex", flexDirection: "column" }}>
@@ -259,6 +276,7 @@ export default function App() {
               onFlowSnapshot={handleFlowSnapshot}
               onSelectionChange={handleSelectionChange}
               nodeRunStatus={nodeRunStatus}
+              nodeValidationErrors={nodeValidationErrors}
             />
           </ErrorBoundary>
         ) : (
@@ -273,6 +291,7 @@ export default function App() {
           <PropertyPanel
             canvasRef={canvasRef}
             selectedNodeId={selectedNodeId}
+            nodeValidationErrors={nodeValidationErrors}
           />
           <RunHistory flowId={activeFlowId} />
           {activeFlowId && (

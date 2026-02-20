@@ -103,10 +103,11 @@ interface CanvasProps {
   onFlowSnapshot: (snapshot: { nodes: FlowNode[]; edges: FlowEdge[] }) => void;
   onSelectionChange: (nodeId: string | null) => void;
   nodeRunStatus?: Record<string, "running" | "completed" | "failed">;
+  nodeValidationErrors?: Record<string, string[]>;
 }
 
 const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
-  { flowId, initialFlow, onFlowSnapshot, onSelectionChange, nodeRunStatus },
+  { flowId, initialFlow, onFlowSnapshot, onSelectionChange, nodeRunStatus, nodeValidationErrors },
   ref
 ) {
   const [nodes, setNodes, onNodesChange] = useNodesState<RFNode>([]);
@@ -140,6 +141,19 @@ const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
       })
     );
   }, [nodeRunStatus, setNodes]);
+
+  // --- Merge validation errors into node data ---
+  useEffect(() => {
+    if (!nodeValidationErrors) return;
+    setNodes((nds) =>
+      nds.map((n) => {
+        const errors = nodeValidationErrors[n.id] ?? undefined;
+        const prev = n.data.validationErrors as string[] | undefined;
+        if (prev === errors || (JSON.stringify(prev) === JSON.stringify(errors))) return n;
+        return { ...n, data: { ...n.data, validationErrors: errors } };
+      })
+    );
+  }, [nodeValidationErrors, setNodes]);
 
   // --- Snapshot emission (debounced) ---
   useEffect(() => {

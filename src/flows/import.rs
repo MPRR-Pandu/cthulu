@@ -6,13 +6,13 @@ use uuid::Uuid;
 use crate::config::{
     CronTriggerConfig, ExecutorType, GithubTriggerConfig, SourceConfig, TaskConfig,
 };
-use crate::flows::storage::FlowStore;
+use crate::flows::store::Store;
 use crate::flows::{Edge, Flow, Node, NodeType, Position};
 
 const NODE_SPACING_X: f64 = 280.0;
 const NODE_SPACING_Y: f64 = 120.0;
 
-pub async fn import_toml_tasks(tasks: &[TaskConfig], store: &FlowStore) -> Result<usize> {
+pub async fn import_toml_tasks(tasks: &[TaskConfig], store: &dyn Store) -> Result<usize> {
     let mut count = 0;
 
     for task in tasks {
@@ -24,7 +24,7 @@ pub async fn import_toml_tasks(tasks: &[TaskConfig], store: &FlowStore) -> Resul
             edges = flow.edges.len(),
             "Imported TOML task as flow"
         );
-        store.save(flow).await?;
+        store.save_flow(flow).await?;
         count += 1;
     }
 

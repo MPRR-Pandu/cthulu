@@ -4,9 +4,8 @@ pub mod routes;
 
 use axum::Router;
 
-use crate::flows::history::RunHistory;
 use crate::flows::scheduler::FlowScheduler;
-use crate::flows::storage::FlowStore;
+use crate::flows::store::Store;
 use crate::github::client::GithubClient;
 use std::sync::Arc;
 
@@ -15,8 +14,7 @@ pub struct AppState {
     pub config: Arc<crate::config::Config>,
     pub github_client: Option<Arc<dyn GithubClient>>,
     pub http_client: Arc<reqwest::Client>,
-    pub flow_store: Arc<FlowStore>,
-    pub run_history: Arc<RunHistory>,
+    pub store: Arc<dyn Store>,
     pub scheduler: Arc<FlowScheduler>,
 }
 

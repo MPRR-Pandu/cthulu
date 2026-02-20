@@ -18,9 +18,9 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
-use crate::flows::history::RunHistory;
+use crate::flows::file_store::FileStore;
 use crate::flows::scheduler::FlowScheduler;
-use crate::flows::storage::FlowStore;
+use crate::flows::store::Store;
 use crate::github::client::{GithubClient, HttpGithubClient};
 
 #[tokio::main]
@@ -72,21 +72,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let config = Arc::new(config);
 
-    // Initialize flow store
-    let flows_dir = dirs::home_dir()
+    // Initialize unified store (flows + runs)
+    let base_dir = dirs::home_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join(".cthulu")
-        .join("flows");
-    let flow_store = Arc::new(FlowStore::new(flows_dir));
-    flow_store
+        .join(".cthulu");
+    let store: Arc<dyn Store> = Arc::new(FileStore::new(base_dir));
+    store
         .load_all()
         .await
-        .context("failed to load flows")?;
+        .context("failed to load store")?;
 
     // Import TOML tasks that don't already exist as flows
     if !config.tasks.is_empty() {
-        let existing: std::collections::HashSet<String> = flow_store
-            .list()
+        let existing: std::collections::HashSet<String> = store
+            .list_flows()
             .await
             .into_iter()
             .map(|f| f.name)
@@ -99,19 +98,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
             .collect();
         if !new_tasks.is_empty() {
             tracing::info!("Importing {} new TOML tasks as flows", new_tasks.len());
-            match flows::import::import_toml_tasks(&new_tasks, &flow_store).await {
+            match flows::import::import_toml_tasks(&new_tasks, &*store).await {
                 Ok(count) => tracing::info!(count, "TOML tasks imported as flows"),
                 Err(e) => tracing::error!(error = %e, "Failed to import TOML tasks"),
             }
         }
     }
 
-    let run_history = Arc::new(RunHistory::new());
-
     // Create and start the flow scheduler
     let scheduler = Arc::new(FlowScheduler::new(
-        flow_store.clone(),
-        run_history.clone(),
+        store.clone(),
         http_client.clone(),
         github_client.clone(),
     ));
@@ -121,8 +117,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         config: config.clone(),
         github_client,
         http_client,
-        flow_store,
-        run_history,
+        store,
         scheduler,
     };
 

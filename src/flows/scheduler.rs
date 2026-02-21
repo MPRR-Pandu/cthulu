@@ -647,12 +647,14 @@ mod tests {
     use std::sync::Mutex as StdMutex;
 
     // --- Mock GithubClient ---
+    #[allow(dead_code)]
     struct MockGithubClient {
         prs: StdMutex<Vec<PullRequest>>,
         comments_posted: StdMutex<Vec<(String, u64, String)>>,
         diff: String,
     }
 
+    #[allow(dead_code)]
     impl MockGithubClient {
         fn new(prs: Vec<PullRequest>, diff: &str) -> Self {
             Self {

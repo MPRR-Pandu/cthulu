@@ -8,6 +8,8 @@ interface TopBarProps {
   onTrigger: () => void;
   onToggleEnabled: () => void;
   onSettingsClick: () => void;
+  interactOpen: boolean;
+  onToggleInteract: () => void;
   consoleOpen: boolean;
   onToggleConsole: () => void;
   runLogOpen: boolean;
@@ -23,6 +25,8 @@ export default function TopBar({
   onTrigger,
   onToggleEnabled,
   onSettingsClick,
+  interactOpen,
+  onToggleInteract,
   consoleOpen,
   onToggleConsole,
   runLogOpen,
@@ -101,6 +105,15 @@ export default function TopBar({
         {flow && (
           <button className="primary" onClick={handleRunClick} disabled={!connected}>
             Run
+          </button>
+        )}
+        {flow && (
+          <button
+            className={`ghost ${interactOpen ? "console-toggle-active" : ""}`}
+            onClick={onToggleInteract}
+            disabled={!connected}
+          >
+            Interact
           </button>
         )}
         <div className="connection-status">

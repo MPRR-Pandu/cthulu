@@ -1,5 +1,6 @@
 import { useState, useEffect, type RefObject } from "react";
-import type { FlowNode } from "../types/flow";
+import * as api from "../api/client";
+import type { FlowNode, SavedPrompt } from "../types/flow";
 import type { CanvasHandle } from "./Canvas";
 
 interface PropertyPanelProps {
@@ -206,49 +207,11 @@ function renderConfigFields(
     case "claude-code": {
       const promptErr = fieldHasError(errors, "prompt");
       return (
-        <>
-          <div className="form-group">
-            <label>Prompt (file path or inline)</label>
-            <textarea
-              className={promptErr ? "input-error" : ""}
-              value={(config.prompt as string) || ""}
-              onChange={(e) => onChange("prompt", e.target.value)}
-              placeholder="prompts/my_prompt.md"
-            />
-            {promptErr && <span className="field-error">{promptErr}</span>}
-          </div>
-          <div className="form-group">
-            <label>Permissions (comma separated)</label>
-            <input
-              value={
-                Array.isArray(config.permissions)
-                  ? (config.permissions as string[]).join(", ")
-                  : ""
-              }
-              onChange={(e) =>
-                onChange(
-                  "permissions",
-                  e.target.value.split(",").map((s) => s.trim()).filter(Boolean)
-                )
-              }
-              placeholder="Bash, Read, Grep, Glob"
-            />
-          </div>
-          <div className="form-group">
-            <label>System Prompt</label>
-            <textarea
-              value={(config.append_system_prompt as string) || ""}
-              onChange={(e) =>
-                onChange(
-                  "append_system_prompt",
-                  e.target.value || null
-                )
-              }
-              placeholder="Additional instructions appended to Claude's system prompt"
-              rows={4}
-            />
-          </div>
-        </>
+        <ClaudeCodeFields
+          config={config}
+          onChange={onChange}
+          promptErr={promptErr}
+        />
       );
     }
     case "web-scrape": {
@@ -516,4 +479,124 @@ function renderConfigFields(
         </div>
       );
   }
+}
+
+function ClaudeCodeFields({
+  config,
+  onChange,
+  promptErr,
+}: {
+  config: Record<string, unknown>;
+  onChange: (key: string, value: unknown) => void;
+  promptErr: string | undefined;
+}) {
+  const [showLibrary, setShowLibrary] = useState(false);
+  const [savedPrompts, setSavedPrompts] = useState<SavedPrompt[]>([]);
+  const [loadingPrompts, setLoadingPrompts] = useState(false);
+
+  const handleOpenLibrary = () => {
+    setShowLibrary(true);
+    setLoadingPrompts(true);
+    api.listPrompts()
+      .then(setSavedPrompts)
+      .catch(() => {})
+      .finally(() => setLoadingPrompts(false));
+  };
+
+  const handleImportPrompt = (saved: SavedPrompt) => {
+    onChange("prompt", saved.summary);
+    setShowLibrary(false);
+  };
+
+  return (
+    <>
+      <div className="form-group">
+        <label>Prompt (file path or inline)</label>
+        <textarea
+          className={promptErr ? "input-error" : ""}
+          value={(config.prompt as string) || ""}
+          onChange={(e) => onChange("prompt", e.target.value)}
+          placeholder="prompts/my_prompt.md"
+        />
+        {promptErr && <span className="field-error">{promptErr}</span>}
+        <button
+          className="ghost"
+          style={{ marginTop: 6, fontSize: 11 }}
+          onClick={handleOpenLibrary}
+        >
+          Import from Library
+        </button>
+      </div>
+      <div className="form-group">
+        <label>Permissions (comma separated)</label>
+        <input
+          value={
+            Array.isArray(config.permissions)
+              ? (config.permissions as string[]).join(", ")
+              : ""
+          }
+          onChange={(e) =>
+            onChange(
+              "permissions",
+              e.target.value.split(",").map((s) => s.trim()).filter(Boolean)
+            )
+          }
+          placeholder="Bash, Read, Grep, Glob"
+        />
+      </div>
+      <div className="form-group">
+        <label>System Prompt</label>
+        <textarea
+          value={(config.append_system_prompt as string) || ""}
+          onChange={(e) =>
+            onChange(
+              "append_system_prompt",
+              e.target.value || null
+            )
+          }
+          placeholder="Additional instructions appended to Claude's system prompt"
+          rows={4}
+        />
+      </div>
+
+      {showLibrary && (
+        <div className="modal-overlay" onClick={() => setShowLibrary(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Prompts Library</h2>
+            {loadingPrompts ? (
+              <p style={{ color: "var(--text-secondary)", fontSize: 13 }}>Loading...</p>
+            ) : savedPrompts.length === 0 ? (
+              <p style={{ color: "var(--text-secondary)", fontSize: 13 }}>
+                No saved prompts yet. Prompts are saved when you delete a flow with interact session history.
+              </p>
+            ) : (
+              <div className="prompt-library-list">
+                {savedPrompts.map((p) => (
+                  <div
+                    key={p.id}
+                    className="prompt-library-item"
+                    onClick={() => handleImportPrompt(p)}
+                  >
+                    <div className="prompt-library-title">{p.title}</div>
+                    <div className="prompt-library-meta">
+                      from {p.source_flow_name}
+                      {p.tags.length > 0 && ` \u00b7 ${p.tags.join(", ")}`}
+                    </div>
+                    <div className="prompt-library-preview">
+                      {p.summary.length > 120 ? p.summary.slice(0, 120) + "..." : p.summary}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="modal-actions">
+              <button className="ghost" onClick={() => setShowLibrary(false)}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
 }

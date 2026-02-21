@@ -12,6 +12,7 @@ import PropertyPanel from "./components/PropertyPanel";
 import RunHistory from "./components/RunHistory";
 import Console from "./components/Console";
 import RunLog from "./components/RunLog";
+import InteractPanel, { type InteractPanelState } from "./components/InteractPanel";
 import ErrorBoundary from "./components/ErrorBoundary";
 
 export default function App() {
@@ -23,7 +24,11 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showConsole, setShowConsole] = useState(false);
   const [showRunLog, setShowRunLog] = useState(false);
+  const [showInteract, setShowInteract] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteSaving, setDeleteSaving] = useState(false);
   const [errorCount, setErrorCount] = useState(0);
+  const sessionsRef = useRef<Map<string, InteractPanelState>>(new Map());
   const [serverUrl, setServerUrlState] = useState(api.getServerUrl());
   const [runEvents, setRunEvents] = useState<RunEvent[]>([]);
   const [nodeRunStatus, setNodeRunStatus] = useState<Record<string, "running" | "completed" | "failed">>({});
@@ -221,16 +226,84 @@ export default function App() {
     } catch { /* logged */ }
   };
 
+  const handleToggleInteract = useCallback(() => {
+    setShowInteract((v) => {
+      if (!v) {
+        // Opening interact — close other bottom panels
+        setShowConsole(false);
+        setShowRunLog(false);
+      }
+      return !v;
+    });
+  }, []);
+
+  const handleInteractStateChange = useCallback((state: InteractPanelState) => {
+    if (activeFlowId) {
+      sessionsRef.current.set(activeFlowId, state);
+    }
+  }, [activeFlowId]);
+
   const handleDeleteFlow = async () => {
+    if (!activeFlowId) return;
+    // If there's session history in any tab, show the confirmation dialog
+    const panelState = sessionsRef.current.get(activeFlowId);
+    if (panelState) {
+      const hasHistory = Object.values(panelState.tabs).some(
+        (tab) => tab.outputLines.length > 0
+      );
+      if (hasHistory) {
+        setShowDeleteConfirm(true);
+        return;
+      }
+    }
+    // No session history — delete directly
+    await doDeleteFlow();
+  };
+
+  const doDeleteFlow = async () => {
     if (!activeFlowId) return;
     try {
       await api.deleteFlow(activeFlowId);
+      sessionsRef.current.delete(activeFlowId);
+      setShowInteract(false);
+      setShowDeleteConfirm(false);
       setActiveFlowId(null);
       setInitialFlow(null);
       setActiveFlowMeta(null);
       setSelectedNodeId(null);
       loadFlows();
     } catch { /* logged */ }
+  };
+
+  const handleSaveAndDelete = async () => {
+    if (!activeFlowId || !activeFlowMeta) return;
+    setDeleteSaving(true);
+    try {
+      const panelState = sessionsRef.current.get(activeFlowId);
+      // Gather output from all tabs into a single transcript
+      const allLines = panelState
+        ? Object.values(panelState.tabs).flatMap((tab) => tab.outputLines)
+        : [];
+      const transcript = allLines
+        .map((l) => `[${l.type}] ${l.text}`)
+        .join("\n");
+      const result = await api.summarizeSession(
+        transcript,
+        activeFlowMeta.name,
+        activeFlowMeta.description
+      );
+      await api.savePrompt({
+        title: result.title,
+        summary: result.summary,
+        source_flow_name: activeFlowMeta.name,
+        tags: result.tags,
+      });
+      log("info", `Saved session summary as prompt: ${result.title}`);
+    } catch (err) {
+      log("error", `Failed to save session summary: ${(err as Error).message}`);
+    }
+    setDeleteSaving(false);
+    await doDeleteFlow();
   };
 
   const handleSaveSettings = () => {
@@ -241,16 +314,28 @@ export default function App() {
   };
 
   return (
-    <div className={showConsole || showRunLog ? "app-with-console" : ""}>
+    <div className={showConsole || showRunLog || showInteract ? "app-with-console" : ""}>
       <TopBar
         flow={activeFlowMeta}
         onTrigger={handleTrigger}
         onToggleEnabled={handleToggleEnabled}
         onSettingsClick={() => setShowSettings(true)}
+        interactOpen={showInteract}
+        onToggleInteract={handleToggleInteract}
         consoleOpen={showConsole}
-        onToggleConsole={() => setShowConsole((v) => !v)}
+        onToggleConsole={() => {
+          setShowConsole((v) => {
+            if (!v) { setShowRunLog(false); setShowInteract(false); }
+            return !v;
+          });
+        }}
         runLogOpen={showRunLog}
-        onToggleRunLog={() => setShowRunLog((v) => !v)}
+        onToggleRunLog={() => {
+          setShowRunLog((v) => {
+            if (!v) { setShowConsole(false); setShowInteract(false); }
+            return !v;
+          });
+        }}
         errorCount={errorCount}
         flowHasErrors={flowHasErrors}
         validationErrors={nodeValidationErrors}
@@ -304,8 +389,39 @@ export default function App() {
         </div>
       </div>
 
-      {showRunLog && <RunLog events={runEvents} onClear={() => setRunEvents([])} onClose={() => setShowRunLog(false)} />}
-      {showConsole && !showRunLog && <Console onClose={() => setShowConsole(false)} />}
+      {showRunLog && !showInteract && <RunLog events={runEvents} onClear={() => setRunEvents([])} onClose={() => setShowRunLog(false)} />}
+      {showConsole && !showRunLog && !showInteract && <Console onClose={() => setShowConsole(false)} />}
+      {showInteract && activeFlowId && (
+        <InteractPanel
+          key={activeFlowId}
+          flowId={activeFlowId}
+          onClose={() => setShowInteract(false)}
+          initialState={sessionsRef.current.get(activeFlowId) ?? null}
+          onStateChange={handleInteractStateChange}
+        />
+      )}
+
+      {showDeleteConfirm && (
+        <div className="modal-overlay" onClick={() => setShowDeleteConfirm(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Delete Flow</h2>
+            <p style={{ fontSize: 13, color: "var(--text-secondary)", marginBottom: 16 }}>
+              This flow has an interact session with history. Would you like to save a summary to the Prompts Library before deleting?
+            </p>
+            <div className="modal-actions">
+              <button className="ghost" onClick={() => setShowDeleteConfirm(false)}>
+                Cancel
+              </button>
+              <button className="danger" onClick={doDeleteFlow}>
+                Delete Only
+              </button>
+              <button className="primary" onClick={handleSaveAndDelete} disabled={deleteSaving}>
+                {deleteSaving ? "Saving..." : "Save & Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showSettings && (
         <div className="modal-overlay" onClick={() => setShowSettings(false)}>

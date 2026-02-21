@@ -509,7 +509,12 @@ export default function InteractPanel({
         return next;
       });
       if (activeSessionId === sessionId) {
-        setActiveSessionId(result.active_session);
+        const updated = sessionList.filter((s) => s.session_id !== sessionId);
+        const fallback = updated.length > 0 ? updated[0].session_id : undefined;
+        const next = result.active_session && updated.some((s) => s.session_id === result.active_session)
+          ? result.active_session
+          : fallback;
+        setActiveSessionId(next ?? null);
       }
     } catch (err) {
       log(

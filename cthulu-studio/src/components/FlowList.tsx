@@ -25,19 +25,19 @@ export default function FlowList({
         {flows.map((flow) => (
           <div
             key={flow.id}
-            className={`flow-item ${flow.id === activeFlowId ? "active" : ""}${!(flow.enabled && flow.scheduler_active) ? " flow-item-disabled" : ""}`}
+            className={`flow-item ${flow.id === activeFlowId ? "active" : ""}${!(flow.enabled) ? " flow-item-disabled" : ""}`}
             onClick={() => onSelect(flow.id)}
           >
             <div className="flow-item-name">
               <span
-                className={`flow-status-dot ${flow.enabled && flow.scheduler_active ? "enabled" : "disabled"}`}
-                title={flow.enabled && flow.scheduler_active ? "Enabled" : "Disabled"}
+                className={`flow-status-dot ${flow.enabled ? "enabled" : "disabled"}`}
+                title={flow.enabled ? "Enabled" : "Disabled"}
               />
               {flow.name}
             </div>
             <div className="flow-item-meta">
               {flow.node_count} nodes &middot;{" "}
-              {flow.enabled && flow.scheduler_active ? "Enabled" : "Disabled"}
+              {flow.enabled ? "Enabled" : "Disabled"}
             </div>
           </div>
         ))}

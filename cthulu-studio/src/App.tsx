@@ -31,7 +31,7 @@ export default function App() {
   const [runEvents, setRunEvents] = useState<RunEvent[]>([]);
   const [nodeRunStatus, setNodeRunStatus] = useState<Record<string, "running" | "completed" | "failed">>({});
   // Keep a light reference for TopBar (name, enabled) without driving Canvas
-  const [activeFlowMeta, setActiveFlowMeta] = useState<{ id: string; name: string; description: string; enabled: boolean; scheduler_active: boolean } | null>(null);
+  const [activeFlowMeta, setActiveFlowMeta] = useState<{ id: string; name: string; description: string; enabled: boolean } | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const canvasRef = useRef<CanvasHandle>(null);
 
@@ -168,7 +168,7 @@ export default function App() {
       const flow = await api.getFlow(id);
       setInitialFlow(flow);
       setActiveFlowId(flow.id);
-      setActiveFlowMeta({ id: flow.id, name: flow.name, description: flow.description, enabled: flow.enabled, scheduler_active: flow.scheduler_active });
+      setActiveFlowMeta({ id: flow.id, name: flow.name, description: flow.description, enabled: flow.enabled });
       setSelectedNodeId(null);
     } catch { /* logged */ }
   };

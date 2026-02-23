@@ -55,8 +55,7 @@ async fn list_flows(State(state): State<AppState>) -> Json<Value> {
                 "id": f.id,
                 "name": f.name,
                 "description": f.description,
-                "enabled": f.enabled,
-                "scheduler_active": active_ids.contains(&f.id),
+                "enabled": f.enabled && active_ids.contains(&f.id),
                 "node_count": f.nodes.len(),
                 "edge_count": f.edges.len(),
                 "created_at": f.created_at,
@@ -81,7 +80,7 @@ async fn get_flow(
 
     let active_ids = state.scheduler.active_flow_ids().await;
     let mut val = serde_json::to_value(&flow).unwrap();
-    val["scheduler_active"] = json!(active_ids.contains(&flow.id));
+    val["enabled"] = json!(flow.enabled && active_ids.contains(&flow.id));
     Ok(Json(val))
 }
 
@@ -183,7 +182,10 @@ async fn update_flow(
         tracing::warn!(flow_id = %id, error = %e, "Failed to restart trigger for updated flow");
     }
 
-    Ok(Json(serde_json::to_value(&flow).unwrap()))
+    let active_ids = state.scheduler.active_flow_ids().await;
+    let mut val = serde_json::to_value(&flow).unwrap();
+    val["enabled"] = json!(flow.enabled && active_ids.contains(&flow.id));
+    Ok(Json(val))
 }
 
 async fn delete_flow(

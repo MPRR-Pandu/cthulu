@@ -46,6 +46,7 @@ pub fn flow_router() -> Router<AppState> {
 
 async fn list_flows(State(state): State<AppState>) -> Json<Value> {
     let flows = state.store.list_flows().await;
+    let active_ids = state.scheduler.active_flow_ids().await;
 
     let summaries: Vec<Value> = flows
         .iter()
@@ -55,6 +56,7 @@ async fn list_flows(State(state): State<AppState>) -> Json<Value> {
                 "name": f.name,
                 "description": f.description,
                 "enabled": f.enabled,
+                "scheduler_active": active_ids.contains(&f.id),
                 "node_count": f.nodes.len(),
                 "edge_count": f.edges.len(),
                 "created_at": f.created_at,
@@ -77,7 +79,10 @@ async fn get_flow(
         )
     })?;
 
-    Ok(Json(serde_json::to_value(&flow).unwrap()))
+    let active_ids = state.scheduler.active_flow_ids().await;
+    let mut val = serde_json::to_value(&flow).unwrap();
+    val["scheduler_active"] = json!(active_ids.contains(&flow.id));
+    Ok(Json(val))
 }
 
 #[derive(Deserialize)]

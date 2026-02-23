@@ -19,7 +19,7 @@ function formatRelativeTime(iso: string): string {
 }
 
 interface TopBarProps {
-  flow: { name: string; enabled: boolean } | null;
+  flow: { name: string; enabled: boolean; scheduler_active: boolean } | null;
   flowId: string | null;
   onTrigger: () => void;
   onToggleEnabled: () => void;
@@ -128,13 +128,13 @@ export default function TopBar({
           <>
             <span className="flow-name">{flow.name}</span>
             <button
-              className={`ghost flow-toggle ${flow.enabled ? "flow-toggle-enabled" : "flow-toggle-disabled"}`}
+              className={`ghost flow-toggle ${flow.enabled && flow.scheduler_active ? "flow-toggle-enabled" : "flow-toggle-disabled"}`}
               onClick={onToggleEnabled}
             >
-              <span className={`flow-toggle-dot ${flow.enabled ? "enabled" : "disabled"}`} />
-              {flow.enabled ? "Enabled" : "Disabled"}
+              <span className={`flow-toggle-dot ${flow.enabled && flow.scheduler_active ? "enabled" : "disabled"}`} />
+              {flow.enabled && flow.scheduler_active ? "Enabled" : "Disabled"}
             </button>
-            {nextRun && flow.enabled && (
+            {nextRun && flow.enabled && flow.scheduler_active && (
               <span className="next-run-label" title={new Date(nextRun).toLocaleString()}>
                 Next: {formatRelativeTime(nextRun)}
               </span>
@@ -150,12 +150,12 @@ export default function TopBar({
             title={
               !connected
                 ? "Server disconnected"
-                : !flow.enabled
+                : !(flow.enabled && flow.scheduler_active)
                   ? "Flow is disabled — manual run still works"
                   : undefined
             }
           >
-            Run{!flow.enabled ? " (Manual)" : ""}
+            Run{!(flow.enabled && flow.scheduler_active) ? " (Manual)" : ""}
           </button>
         )}
         <div className="connection-status">

@@ -25,6 +25,7 @@ export interface Flow {
   name: string;
   description: string;
   enabled: boolean;
+  scheduler_active: boolean;
   nodes: FlowNode[];
   edges: FlowEdge[];
   created_at: string;
@@ -36,6 +37,7 @@ export interface FlowSummary {
   name: string;
   description: string;
   enabled: boolean;
+  scheduler_active: boolean;
   node_count: number;
   edge_count: number;
   created_at: string;

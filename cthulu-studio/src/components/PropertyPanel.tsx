@@ -200,6 +200,48 @@ function renderConfigFields(
         />
       );
     }
+    case "google-sheets": {
+      const idErr = fieldHasError(errors, "spreadsheet id");
+      return (
+        <>
+          <div className="form-group">
+            <label>Spreadsheet ID</label>
+            <input
+              className={idErr ? "input-error" : ""}
+              value={(config.spreadsheet_id as string) || ""}
+              onChange={(e) => onChange("spreadsheet_id", e.target.value)}
+              placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms"
+            />
+            {idErr && <span className="field-error">{idErr}</span>}
+          </div>
+          <div className="form-group">
+            <label>Range</label>
+            <input
+              value={(config.range as string) || ""}
+              onChange={(e) => onChange("range", e.target.value || null)}
+              placeholder="Sheet1!A1:Z1000"
+            />
+          </div>
+          <div className="form-group">
+            <label>Service Account Key Env Var</label>
+            <input
+              value={(config.service_account_key_env as string) || ""}
+              onChange={(e) => onChange("service_account_key_env", e.target.value || null)}
+              placeholder="GOOGLE_SERVICE_ACCOUNT_KEY"
+            />
+          </div>
+          <div className="form-group">
+            <label>Limit</label>
+            <input
+              type="number"
+              value={(config.limit as number) || ""}
+              onChange={(e) => onChange("limit", e.target.value ? parseInt(e.target.value) : null)}
+              placeholder="50"
+            />
+          </div>
+        </>
+      );
+    }
     case "web-scrape": {
       const urlErr = fieldHasError(errors, "page url");
       return (

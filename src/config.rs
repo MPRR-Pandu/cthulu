@@ -48,6 +48,15 @@ pub enum SourceConfig {
         #[serde(default = "default_since_days")]
         since_days: u64,
     },
+    GoogleSheets {
+        spreadsheet_id: String,
+        #[serde(default)]
+        range: Option<String>,
+        #[serde(default)]
+        service_account_key_env: Option<String>,
+        #[serde(default)]
+        limit: Option<usize>,
+    },
     WebScraper {
         url: String,
         #[serde(default)]

@@ -1,0 +1,72 @@
+{
+  "id": "performance-analyzer",
+  "name": "Performance Analyzer",
+  "description": "Reads content performance data from Google Sheets, analyzes what's working with Claude, and pushes insights to Slack and Notion.",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "trigger-daily",
+      "node_type": "trigger",
+      "kind": "cron",
+      "config": {
+        "schedule": "0 9 * * *",
+        "working_dir": "."
+      },
+      "position": { "x": 0, "y": 100 },
+      "label": "Daily 9 AM"
+    },
+    {
+      "id": "source-gsheets",
+      "node_type": "source",
+      "kind": "google-sheets",
+      "config": {
+        "spreadsheet_id": "1AET1UK8L98M-jk1QNofJKAdRd_nIZ1KFG1Q3UaWBMZA",
+        "range": "'X - News - Text Posts'",
+        "service_account_key_env": "GOOGLE_SERVICE_ACCOUNT_KEY",
+        "limit": 100
+      },
+      "position": { "x": 300, "y": 100 },
+      "label": "Google Sheets: Performance Data"
+    },
+    {
+      "id": "executor-analyze",
+      "node_type": "executor",
+      "kind": "claude-code",
+      "config": {
+        "prompt": "You are a content performance analyst. You have been given rows of content performance data from a spreadsheet. Each row contains metrics like platform, category, likes, views, comments, etc.\n\nAnalyze the data and produce a concise insights report:\n\n1. **Top Performers** - Which posts/content performed best and why?\n2. **Platform Breakdown** - How does performance vary across platforms?\n3. **Category Trends** - Which categories/topics resonate most?\n4. **Engagement Patterns** - What engagement patterns do you see (likes vs comments vs views ratios)?\n5. **Recommendations** - 3-5 actionable recommendations for improving content performance.\n\nFormat the output as a well-structured report with headers, bullet points, and key metrics highlighted. Keep it concise but data-driven.",
+        "permissions": ["Read"]
+      },
+      "position": { "x": 600, "y": 100 },
+      "label": "Executor - E01"
+    },
+    {
+      "id": "sink-slack",
+      "node_type": "sink",
+      "kind": "slack",
+      "config": {
+        "webhook_url_env": "SLACK_WEBHOOK_URL"
+      },
+      "position": { "x": 900, "y": 0 },
+      "label": "Slack: Insights"
+    },
+    {
+      "id": "sink-notion",
+      "node_type": "sink",
+      "kind": "notion",
+      "config": {
+        "token_env": "NOTION_TOKEN",
+        "database_id": ""
+      },
+      "position": { "x": 900, "y": 200 },
+      "label": "Notion: Reports"
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "trigger-daily", "target": "source-gsheets" },
+    { "id": "e2", "source": "source-gsheets", "target": "executor-analyze" },
+    { "id": "e3", "source": "executor-analyze", "target": "sink-slack" },
+    { "id": "e4", "source": "executor-analyze", "target": "sink-notion" }
+  ],
+  "created_at": "2026-02-24T00:00:00Z",
+  "updated_at": "2026-02-24T00:00:00Z"
+}

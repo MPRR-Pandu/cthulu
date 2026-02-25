@@ -1,3 +1,4 @@
+pub mod google_sheets;
 pub mod market;
 pub mod github_prs;
 pub mod rss;
@@ -78,6 +79,30 @@ pub async fn fetch_all(
                         }
                         Err(e) => {
                             tracing::error!(repos = ?repos, error = %e, "Failed to fetch merged PRs");
+                            Vec::new()
+                        }
+                    }
+                }
+                SourceConfig::GoogleSheets {
+                    spreadsheet_id, range, service_account_key_env, limit,
+                } => {
+                    let env_var = service_account_key_env
+                        .as_deref()
+                        .unwrap_or("GOOGLE_SERVICE_ACCOUNT_KEY");
+                    let key_path = std::env::var(env_var).ok();
+                    match google_sheets::fetch_sheet(
+                        http_client,
+                        spreadsheet_id,
+                        range.as_deref(),
+                        key_path.as_deref(),
+                        *limit,
+                    ).await {
+                        Ok(items) => {
+                            tracing::debug!(spreadsheet_id = %spreadsheet_id, count = items.len(), "Fetched Google Sheet");
+                            items
+                        }
+                        Err(e) => {
+                            tracing::error!(spreadsheet_id = %spreadsheet_id, error = %e, "Failed to fetch Google Sheet");
                             Vec::new()
                         }
                     }

@@ -2192,6 +2192,17 @@ async fn get_node_types() -> Json<Value> {
                 }
             },
             {
+                "kind": "google-sheets",
+                "node_type": "source",
+                "label": "Google Sheets",
+                "config_schema": {
+                    "spreadsheet_id": { "type": "string", "description": "Google Sheets spreadsheet ID", "required": true },
+                    "range": { "type": "string", "description": "Sheet range (e.g. Sheet1!A1:Z1000)" },
+                    "service_account_key_env": { "type": "string", "description": "Env var holding path to service account JSON key" },
+                    "limit": { "type": "number", "description": "Max rows to fetch" }
+                }
+            },
+            {
                 "kind": "market-data",
                 "node_type": "source",
                 "label": "Market Data",

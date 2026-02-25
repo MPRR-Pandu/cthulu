@@ -1,4 +1,5 @@
 pub mod claude_code;
+pub mod sandbox;
 
 use anyhow::Result;
 use async_trait::async_trait;

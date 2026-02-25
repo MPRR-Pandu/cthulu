@@ -252,6 +252,7 @@ impl FlowScheduler {
             http_client: self.http_client.clone(),
             github_client: self.github_client.clone(),
             events_tx: Some(self.events_tx.clone()),
+            sandbox_provider: None,
         };
 
         runner
@@ -327,6 +328,7 @@ async fn cron_loop(
             http_client: http_client.clone(),
             github_client: github_client.clone(),
             events_tx: Some(events_tx.clone()),
+            sandbox_provider: None,
         };
 
         if let Err(e) = runner.execute(&flow, &*store).await {
@@ -576,6 +578,7 @@ async fn github_pr_loop(
                     http_client: http_client.clone(),
                     github_client: Some(github_client.clone()),
                     events_tx: Some(events_tx.clone()),
+                    sandbox_provider: None,
                 };
 
                 match runner

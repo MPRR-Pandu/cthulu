@@ -42,6 +42,9 @@ pub fn flow_router() -> Router<AppState> {
         .route("/scheduler/status", get(scheduler_status))
         .route("/validate/cron", post(validate_cron))
         .route("/node-types", get(get_node_types))
+        // Sandbox endpoints
+        .route("/sandbox/info", get(sandbox_info))
+        .route("/sandbox/list", get(sandbox_list))
 }
 
 async fn list_flows(State(state): State<AppState>) -> Json<Value> {
@@ -255,6 +258,7 @@ async fn trigger_flow(
         http_client: state.http_client.clone(),
         github_client: state.github_client.clone(),
         events_tx: Some(state.events_tx.clone()),
+        sandbox_provider: Some(state.sandbox_provider.clone()),
     };
 
     let store = state.store.clone();
@@ -296,6 +300,7 @@ async fn get_session(
         http_client: state.http_client.clone(),
         github_client: state.github_client.clone(),
         events_tx: None,
+        sandbox_provider: Some(state.sandbox_provider.clone()),
     };
 
     // Fallback to minimal session if prepare_session fails (e.g. no executor node).
@@ -401,6 +406,7 @@ async fn new_session(
         http_client: state.http_client.clone(),
         github_client: state.github_client.clone(),
         events_tx: None,
+        sandbox_provider: Some(state.sandbox_provider.clone()),
     };
     let session_info = runner.prepare_session(&flow).await.ok();
     let working_dir = resolve_working_dir(&session_info);
@@ -534,6 +540,7 @@ async fn interact_flow(
         http_client: state.http_client.clone(),
         github_client: state.github_client.clone(),
         events_tx: None,
+        sandbox_provider: Some(state.sandbox_provider.clone()),
     };
 
     let session_info = runner.prepare_session(&flow).await.ok();
@@ -2267,4 +2274,42 @@ async fn stream_runs(
         }
     };
     Sse::new(stream).keep_alive(KeepAlive::new().interval(std::time::Duration::from_secs(15)))
+}
+
+// ── Sandbox endpoints ───────────────────────────────────────────────
+
+/// GET /api/sandbox/info — provider info and capabilities.
+async fn sandbox_info(State(state): State<AppState>) -> Json<Value> {
+    let info = state.sandbox_provider.info();
+    Json(json!({
+        "provider": format!("{:?}", info.kind),
+        "supports_persistent_state": info.supports_persistent_state,
+        "supports_checkpoint": info.supports_checkpoint,
+        "supports_public_http": info.supports_public_http,
+        "supports_sleep_resume": info.supports_sleep_resume,
+    }))
+}
+
+/// GET /api/sandbox/list — list active sandboxes.
+async fn sandbox_list(State(state): State<AppState>) -> Result<Json<Value>, StatusCode> {
+    match state.sandbox_provider.list().await {
+        Ok(sandboxes) => {
+            let items: Vec<Value> = sandboxes
+                .iter()
+                .map(|s| {
+                    json!({
+                        "id": s.id,
+                        "backend": format!("{:?}", s.backend),
+                        "status": format!("{:?}", s.status),
+                        "workspace_id": s.workspace_id,
+                    })
+                })
+                .collect();
+            Ok(Json(json!({ "sandboxes": items })))
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "failed to list sandboxes");
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
 }

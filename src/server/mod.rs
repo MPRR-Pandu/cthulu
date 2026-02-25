@@ -14,6 +14,7 @@ use crate::flows::events::RunEvent;
 use crate::flows::scheduler::FlowScheduler;
 use crate::flows::store::Store;
 use crate::github::client::GithubClient;
+use crate::sandbox::provider::SandboxProvider;
 
 /// Build a composite key for node-scoped sessions: `"flow_id::node_id"`.
 pub fn node_sessions_key(flow_id: &str, node_id: &str) -> String {
@@ -250,6 +251,8 @@ pub struct AppState {
     pub data_dir: PathBuf,
     /// Persistent Claude CLI processes keyed by session key (flow_id::node_id).
     pub live_processes: Arc<Mutex<HashMap<String, LiveClaudeProcess>>>,
+    /// Sandbox provider for isolated executor runs.
+    pub sandbox_provider: Arc<dyn SandboxProvider>,
 }
 
 pub fn create_app(state: AppState) -> Router {

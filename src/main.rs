@@ -1,6 +1,7 @@
 mod config;
 mod flows;
 mod github;
+mod sandbox;
 mod server;
 mod tasks;
 mod tui;
@@ -157,6 +158,122 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
         .join("sessions.yaml");
     let persisted_sessions = server::load_sessions(&sessions_path);
 
+    // Initialize sandbox provider
+    //
+    // Priority:
+    //   1. FIRECRACKER_SSH_HOST → RemoteSsh (real Linux server with /dev/kvm)
+    //   2. FIRECRACKER_API_URL → LimaTcp (Lima VM on macOS, FC API over TCP)
+    //   3. Default → DangerousHost (best-effort host isolation, no VM)
+    let sandbox_provider: Arc<dyn sandbox::SandboxProvider> =
+        if let Ok(ssh_host) = std::env::var("FIRECRACKER_SSH_HOST") {
+            let api_url = std::env::var("FIRECRACKER_API_URL")
+                .unwrap_or_else(|_| format!("http://{}:8080", ssh_host.split('@').last().unwrap_or(&ssh_host)));
+            let ssh_port: u16 = std::env::var("FIRECRACKER_SSH_PORT")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(22);
+            let ssh_key = std::env::var("FIRECRACKER_SSH_KEY").ok();
+
+            tracing::info!(
+                ssh_target = %ssh_host,
+                ssh_port = ssh_port,
+                api_url = %api_url,
+                "initializing Firecracker sandbox provider (RemoteSsh)"
+            );
+
+            let remote_state_dir = std::env::var("FC_REMOTE_STATE_DIR")
+                .unwrap_or_else(|_| "/var/lib/firecracker".into());
+            let remote_fc_bin = std::env::var("FC_REMOTE_BIN")
+                .unwrap_or_else(|_| "/usr/local/bin/firecracker".into());
+
+            let fc_config = sandbox::FirecrackerConfig {
+                host: sandbox::FirecrackerHostTransportConfig::RemoteSsh {
+                    ssh_target: ssh_host,
+                    ssh_port,
+                    ssh_key_path: ssh_key,
+                    api_base_url: api_url,
+                    remote_firecracker_bin: remote_fc_bin,
+                    remote_state_dir: remote_state_dir.clone(),
+                },
+                state_dir: base_dir.join("firecracker"),
+                kernel_image: std::env::var("FC_KERNEL_IMAGE")
+                    .map(std::path::PathBuf::from)
+                    .unwrap_or_else(|_| std::path::PathBuf::from(format!("{remote_state_dir}/vmlinux"))),
+                rootfs_base_image: std::env::var("FC_ROOTFS_IMAGE")
+                    .map(std::path::PathBuf::from)
+                    .unwrap_or_else(|_| std::path::PathBuf::from(format!("{remote_state_dir}/rootfs.ext4"))),
+                default_vcpu: std::env::var("FC_VCPU")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(1),
+                default_memory_mb: std::env::var("FC_MEMORY_MB")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(256),
+                network: sandbox::FirecrackerNetworkConfig {
+                    enable_internet: true,
+                    allowed_egress: vec![],
+                    host_port_range_start: 8100,
+                    host_port_range_end: 8200,
+                },
+                use_jailer: false,
+                guest_agent: sandbox::GuestAgentTransport::Ssh,
+            };
+            Arc::new(
+                sandbox::backends::firecracker::FirecrackerProvider::new(fc_config)
+                    .context("failed to initialize Firecracker sandbox provider")?,
+            )
+        } else if let Ok(fc_api_url) = std::env::var("FIRECRACKER_API_URL") {
+            tracing::info!(
+                api_url = %fc_api_url,
+                "initializing Firecracker sandbox provider (LimaTcp)"
+            );
+            let fc_config = sandbox::FirecrackerConfig {
+                host: sandbox::FirecrackerHostTransportConfig::LimaTcp {
+                    lima_instance: std::env::var("LIMA_INSTANCE").unwrap_or_else(|_| "default".into()),
+                    api_base_url: fc_api_url,
+                    guest_ssh_via_lima: true,
+                },
+                state_dir: base_dir.join("firecracker"),
+                kernel_image: std::env::var("FC_KERNEL_IMAGE")
+                    .map(std::path::PathBuf::from)
+                    .unwrap_or_else(|_| base_dir.join("firecracker/vmlinux")),
+                rootfs_base_image: std::env::var("FC_ROOTFS_IMAGE")
+                    .map(std::path::PathBuf::from)
+                    .unwrap_or_else(|_| base_dir.join("firecracker/rootfs.ext4")),
+                default_vcpu: std::env::var("FC_VCPU")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(1),
+                default_memory_mb: std::env::var("FC_MEMORY_MB")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(256),
+                network: sandbox::FirecrackerNetworkConfig {
+                    enable_internet: true,
+                    allowed_egress: vec![],
+                    host_port_range_start: 8100,
+                    host_port_range_end: 8200,
+                },
+                use_jailer: false,
+                guest_agent: sandbox::GuestAgentTransport::Ssh,
+            };
+            Arc::new(
+                sandbox::backends::firecracker::FirecrackerProvider::new(fc_config)
+                    .context("failed to initialize Firecracker sandbox provider")?,
+            )
+        } else {
+            tracing::info!("initializing DangerousHost sandbox provider (default)");
+            let sandbox_config = sandbox::DangerousConfig {
+                root_dir: base_dir.join("sandboxes"),
+                ..sandbox::DangerousConfig::default()
+            };
+            Arc::new(
+                sandbox::backends::dangerous::DangerousHostProvider::new(sandbox_config)
+                    .context("failed to initialize sandbox provider")?,
+            )
+        };
+
     let app_state = server::AppState {
         github_client,
         http_client,
@@ -167,6 +284,7 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
         sessions_path,
         data_dir: base_dir,
         live_processes: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+        sandbox_provider,
     };
 
     let app = server::create_app(app_state)

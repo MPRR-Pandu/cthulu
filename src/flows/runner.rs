@@ -16,8 +16,10 @@ use crate::flows::store::Store;
 use crate::flows::{Flow, NodeType};
 use crate::github::client::GithubClient;
 use crate::tasks::context::render_prompt;
-use crate::tasks::executors::claude_code::ClaudeCodeExecutor;
+use crate::sandbox::provider::SandboxProvider;
 use crate::tasks::executors::Executor;
+use crate::tasks::executors::claude_code::ClaudeCodeExecutor;
+use crate::tasks::executors::sandbox::SandboxExecutor;
 use crate::tasks::filters::Filter;
 use crate::tasks::filters::keyword::{KeywordFilter, MatchField};
 use crate::tasks::sources::{self, ContentItem};
@@ -41,6 +43,7 @@ pub struct FlowRunner {
     pub http_client: Arc<reqwest::Client>,
     pub github_client: Option<Arc<dyn GithubClient>>,
     pub events_tx: Option<broadcast::Sender<RunEvent>>,
+    pub sandbox_provider: Option<Arc<dyn SandboxProvider>>,
 }
 
 impl FlowRunner {
@@ -601,7 +604,16 @@ impl FlowRunner {
             .map(String::from);
 
         let has_system_prompt = append_system_prompt.is_some();
-        let executor = ClaudeCodeExecutor::new(permissions.clone(), append_system_prompt);
+
+        // Dispatch executor based on node kind
+        let executor: Box<dyn Executor> = match executor_node.kind.as_str() {
+            "sandbox" => {
+                let provider = self.sandbox_provider.as_ref()
+                    .context("sandbox executor requested but no sandbox provider configured")?;
+                Box::new(SandboxExecutor::new(provider.clone(), permissions.clone(), append_system_prompt))
+            }
+            _ => Box::new(ClaudeCodeExecutor::new(permissions.clone(), append_system_prompt)),
+        };
 
         let perms_display = if permissions.is_empty() { "ALL".to_string() } else { permissions.join(", ") };
         tracing::info!(
@@ -770,7 +782,15 @@ impl FlowRunner {
             .as_str()
             .map(String::from);
 
-        let executor = ClaudeCodeExecutor::new(permissions, append_system_prompt);
+        // Dispatch executor based on node kind
+        let executor: Box<dyn Executor> = match executor_node.kind.as_str() {
+            "sandbox" => {
+                let provider = self.sandbox_provider.as_ref()
+                    .context("sandbox executor requested but no sandbox provider configured")?;
+                Box::new(SandboxExecutor::new(provider.clone(), permissions, append_system_prompt))
+            }
+            _ => Box::new(ClaudeCodeExecutor::new(permissions, append_system_prompt)),
+        };
 
         let exec_node_run = NodeRun {
             node_id: executor_node.id.clone(),

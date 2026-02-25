@@ -417,8 +417,7 @@ impl FlowRunner {
         let github_token = self
             .github_client
             .as_ref()
-            .map(|_| std::env::var("GITHUB_TOKEN").ok())
-            .flatten();
+            .and_then(|_| std::env::var("GITHUB_TOKEN").ok());
 
         let items: Vec<ContentItem> = if !source_configs.is_empty() {
             // Record node runs for tracking
@@ -654,11 +653,7 @@ impl FlowRunner {
             "✓ Executor finished",
         );
 
-        let preview = if exec_result.text.len() > 500 {
-            format!("{}...", &exec_result.text[..500])
-        } else {
-            exec_result.text.clone()
-        };
+        let preview = truncate(&exec_result.text, 500);
 
         store
             .complete_node_run(&flow.id, run_id, &executor_node.id, RunStatus::Success, Some(preview))
@@ -669,9 +664,7 @@ impl FlowRunner {
             let sink_configs = parse_sink_configs(&sink_nodes)?;
             let resolved_sinks = resolve_sinks(&sink_configs, &self.http_client)?;
 
-            for (i, sink) in resolved_sinks.iter().enumerate() {
-                let sink_node = &sink_nodes[i];
-
+            for (sink, sink_node) in resolved_sinks.iter().zip(sink_nodes.iter()) {
                 let sink_run = NodeRun {
                     node_id: sink_node.id.clone(),
                     status: RunStatus::Running,
@@ -823,11 +816,7 @@ impl FlowRunner {
             "✓ Executor finished",
         );
 
-        let preview = if exec_result.text.len() > 500 {
-            format!("{}...", &exec_result.text[..500])
-        } else {
-            exec_result.text.clone()
-        };
+        let preview = truncate(&exec_result.text, 500);
 
         store
             .complete_node_run(&flow.id, run_id, &executor_node.id, RunStatus::Success, Some(preview))
@@ -844,8 +833,7 @@ impl FlowRunner {
             let sink_configs = parse_sink_configs(&sink_nodes)?;
             let resolved_sinks = resolve_sinks(&sink_configs, &self.http_client)?;
 
-            for (i, sink) in resolved_sinks.iter().enumerate() {
-                let sink_node = &sink_nodes[i];
+            for (sink, sink_node) in resolved_sinks.iter().zip(sink_nodes.iter()) {
                 self.emit(&flow.id, run_id, Some(&sink_node.id), RunEventType::NodeStarted, format!("Delivering to {}...", sink_node.label));
                 let sink_start = std::time::Instant::now();
                 let result = sink.deliver(&exec_result.text).await;

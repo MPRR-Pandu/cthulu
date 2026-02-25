@@ -33,7 +33,12 @@ pub struct FirecrackerProvider {
     net_allocator: NetworkAllocator,
     counter: AtomicU64,
     /// If set, use TCP to reach the FC API instead of Unix socket.
+    /// WARNING: TCP mode connects to a *shared* Firecracker instance.
+    /// Concurrent provisions will overwrite each other's VM config.
     api_base_url: Option<String>,
+    /// Serializes provision() calls in TCP mode where a shared FC instance
+    /// can only serve one VM at a time. In local socket mode this is unused.
+    tcp_provision_guard: tokio::sync::Mutex<()>,
 }
 
 impl FirecrackerProvider {
@@ -59,11 +64,23 @@ impl FirecrackerProvider {
             ))
         })?;
 
+        // Seed counters from existing fc-* dirs to avoid ID/network collisions
+        // with leftovers from a previous process run.
+        let starting_seq = scan_existing_vms(&config.state_dir);
+        if starting_seq > 0 {
+            tracing::info!(
+                starting_seq,
+                "seeded VM counter from {} existing state dirs",
+                starting_seq
+            );
+        }
+
         Ok(Self {
             transport: Arc::from(transport),
-            net_allocator: NetworkAllocator::new(0),
-            counter: AtomicU64::new(0),
+            net_allocator: NetworkAllocator::new(starting_seq as u16),
+            counter: AtomicU64::new(starting_seq),
             api_base_url,
+            tcp_provision_guard: tokio::sync::Mutex::new(()),
             config,
         })
     }
@@ -100,6 +117,14 @@ impl SandboxProvider for FirecrackerProvider {
         &self,
         spec: SandboxSpec,
     ) -> Result<Box<dyn SandboxHandle>, SandboxError> {
+        // In TCP mode, a shared FC instance can only serve one VM at a time.
+        // Hold the guard for the entire provision to prevent concurrent overwrites.
+        let _tcp_guard = if self.api_base_url.is_some() {
+            Some(self.tcp_provision_guard.lock().await)
+        } else {
+            None
+        };
+
         let seq = self.counter.fetch_add(1, Ordering::SeqCst);
         let vm_id = format!("fc-{}-{seq}", spec.workspace_id);
 
@@ -742,6 +767,30 @@ fn generate_ssh_key(key_path: &std::path::Path) -> Result<(), SandboxError> {
     Ok(())
 }
 
+/// Scan the state directory for existing `fc-*` VM directories and return the
+/// next safe counter value (max existing sequence + 1). This prevents ID and
+/// network/TAP collisions with leftovers from a previous process.
+fn scan_existing_vms(state_dir: &std::path::Path) -> u64 {
+    let Ok(entries) = std::fs::read_dir(state_dir) else {
+        return 0;
+    };
+
+    let mut max_seq: u64 = 0;
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        // VM dirs are named "fc-{workspace_id}-{seq}"
+        if let Some(rest) = name.strip_prefix("fc-") {
+            if let Some((_, seq_str)) = rest.rsplit_once('-') {
+                if let Ok(seq) = seq_str.parse::<u64>() {
+                    max_seq = max_seq.max(seq + 1);
+                }
+            }
+        }
+    }
+
+    max_seq
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -781,5 +830,30 @@ mod tests {
     fn wait_for_socket_path_helper() {
         // Just verify it compiles and has the right signature
         let _ = std::path::Path::new("/tmp/test.socket");
+    }
+
+    #[test]
+    fn scan_existing_vms_empty_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(scan_existing_vms(dir.path()), 0);
+    }
+
+    #[test]
+    fn scan_existing_vms_with_dirs() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("fc-ws1-0")).unwrap();
+        std::fs::create_dir(dir.path().join("fc-ws2-3")).unwrap();
+        std::fs::create_dir(dir.path().join("fc-ws3-7")).unwrap();
+        std::fs::create_dir(dir.path().join("not-a-vm")).unwrap();
+        // Should return max(0+1, 3+1, 7+1) = 8
+        assert_eq!(scan_existing_vms(dir.path()), 8);
+    }
+
+    #[test]
+    fn scan_existing_vms_nonexistent_dir() {
+        assert_eq!(
+            scan_existing_vms(std::path::Path::new("/nonexistent/path")),
+            0
+        );
     }
 }

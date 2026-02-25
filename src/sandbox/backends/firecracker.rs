@@ -8,7 +8,7 @@ use async_trait::async_trait;
 
 use crate::sandbox::error::SandboxError;
 use crate::sandbox::firecracker::guest_agent::{GuestAgent, SshGuestAgent};
-use crate::sandbox::firecracker::host_transport::{self, HostTransport};
+use crate::sandbox::firecracker::host_transport::{self, shell_escape, HostTransport};
 use crate::sandbox::firecracker::net::{self, NetworkAllocator, VmNetwork};
 use crate::sandbox::firecracker::snapshot::SnapshotStore;
 use crate::sandbox::firecracker::vm_api::{
@@ -423,7 +423,7 @@ impl SandboxHandle for FirecrackerHandle {
         if req.create_parents {
             if let Some(parent) = std::path::Path::new(&guest_path).parent() {
                 let mkdir_req = ExecRequest {
-                    command: vec![format!("mkdir -p {}", parent.display())],
+                    command: vec![format!("mkdir -p {}", shell_escape(&parent.display().to_string()))],
                     cwd: None,
                     env: BTreeMap::new(),
                     stdin: None,
@@ -443,7 +443,7 @@ impl SandboxHandle for FirecrackerHandle {
         // Set permissions if requested
         if let Some(mode) = req.mode {
             let chmod_req = ExecRequest {
-                command: vec![format!("chmod {:o} {}", mode, guest_path)],
+                command: vec![format!("chmod {:o} {}", mode, shell_escape(&guest_path))],
                 cwd: None,
                 env: BTreeMap::new(),
                 stdin: None,
@@ -493,7 +493,7 @@ impl SandboxHandle for FirecrackerHandle {
         let req = ExecRequest {
             command: vec![format!(
                 "ls -1ap --color=never {} 2>/dev/null || true",
-                guest_path
+                shell_escape(&guest_path)
             )],
             cwd: None,
             env: BTreeMap::new(),
@@ -530,10 +530,11 @@ impl SandboxHandle for FirecrackerHandle {
             format!("/workspace/{}", path)
         };
 
+        let escaped = shell_escape(&guest_path);
         let cmd = if recursive {
-            format!("rm -rf {guest_path}")
+            format!("rm -rf {escaped}")
         } else {
-            format!("rm -f {guest_path}")
+            format!("rm -f {escaped}")
         };
 
         let req = ExecRequest {

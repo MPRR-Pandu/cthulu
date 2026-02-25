@@ -584,7 +584,10 @@ impl HostTransport for RemoteSshTransport {
 }
 
 /// Minimal shell escaping — wraps in single quotes.
-fn shell_escape(s: &str) -> String {
+///
+/// Used by host transports and guest agent to prevent shell injection
+/// when interpolating user-supplied values into shell command strings.
+pub fn shell_escape(s: &str) -> String {
     if s.contains('\'') {
         format!("\"{}\"", s.replace('"', "\\\""))
     } else if s.contains(' ')

@@ -1,6 +1,8 @@
 pub mod events;
 pub mod file_repository;
+pub mod graph;
 pub mod history;
+pub mod processors;
 pub mod repository;
 pub mod runner;
 pub mod scheduler;

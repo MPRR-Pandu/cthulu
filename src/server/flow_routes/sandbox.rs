@@ -65,14 +65,21 @@ pub(crate) struct VmCreateBody {
 }
 
 /// GET /api/sandbox/vm/{flow_id}/{node_id} — get VM info for an executor node.
+///
+/// Lookup order:
+/// 1. In-memory `node_vms` map (fast path, populated during this server session).
+/// 2. `vm_mappings` (persisted in sessions.yaml) — used after a server restart.
+///    The vm_id stored there is used to query the VM Manager API; if the VM is
+///    still alive its data is seeded back into `node_vms` for future fast-path hits.
 pub(crate) async fn get_node_vm(
     State(state): State<AppState>,
     Path((flow_id, node_id)): Path<(String, String)>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let provider = require_vm_manager(&state)?;
 
-    match provider.get_node_vm(&flow_id, &node_id).await {
-        Some(vm) => Ok(Json(json!({
+    // Fast path: in-memory node_vms map
+    if let Some(vm) = provider.get_node_vm(&flow_id, &node_id).await {
+        return Ok(Json(json!({
             "vm_id": vm.vm_id,
             "tier": vm.tier,
             "guest_ip": vm.guest_ip,
@@ -81,12 +88,62 @@ pub(crate) async fn get_node_vm(
             "ssh_command": vm.ssh_command,
             "web_terminal": vm.web_terminal,
             "pid": vm.pid,
-        }))),
-        None => Err((StatusCode::NOT_FOUND, Json(json!({ "error": "No VM exists for this node" })))),
+        })));
     }
+
+    // Fallback: check vm_mappings (populated from sessions.yaml on startup)
+    let key = format!("{}::{}", flow_id, node_id);
+    let vm_id_opt = {
+        let mappings = state.vm_mappings.read().await;
+        mappings.get(&key).map(|m| m.vm_id)
+    };
+
+    if let Some(vm_id) = vm_id_opt {
+        match provider.restore_node_vm(&flow_id, &node_id, vm_id).await {
+            Ok(vm) => {
+                return Ok(Json(json!({
+                    "vm_id": vm.vm_id,
+                    "tier": vm.tier,
+                    "guest_ip": vm.guest_ip,
+                    "ssh_port": vm.ssh_port,
+                    "web_port": vm.web_port,
+                    "ssh_command": vm.ssh_command,
+                    "web_terminal": vm.web_terminal,
+                    "pid": vm.pid,
+                })));
+            }
+            Err(crate::sandbox::error::SandboxError::NotFound(_)) => {
+                // VM was deleted externally — clear the stale mapping
+                let mut mappings = state.vm_mappings.write().await;
+                mappings.remove(&key);
+                tracing::warn!(
+                    flow_id = %flow_id,
+                    node_id = %node_id,
+                    vm_id = vm_id,
+                    "VM from sessions.yaml no longer exists on VM Manager"
+                );
+                // Fall through to NOT_FOUND
+            }
+            Err(e) => {
+                tracing::warn!(
+                    flow_id = %flow_id,
+                    node_id = %node_id,
+                    vm_id = vm_id,
+                    error = %e,
+                    "failed to restore VM from sessions.yaml"
+                );
+                // Fall through to NOT_FOUND
+            }
+        }
+    }
+
+    Err((StatusCode::NOT_FOUND, Json(json!({ "error": "No VM exists for this node" }))))
 }
 
 /// POST /api/sandbox/vm/{flow_id}/{node_id} — create (or get existing) VM for an executor node.
+///
+/// Before creating a new VM, checks vm_mappings (sessions.yaml) for a persisted vm_id
+/// and attempts to reconnect to that VM if it's still alive.
 pub(crate) async fn create_node_vm(
     State(state): State<AppState>,
     Path((flow_id, node_id)): Path<(String, String)>,
@@ -94,12 +151,20 @@ pub(crate) async fn create_node_vm(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let provider = require_vm_manager(&state)?;
 
+    // Check if we have a persisted vm_id for this node from sessions.yaml
+    let key = format!("{}::{}", flow_id, node_id);
+    let persisted_vm_id = {
+        let mappings = state.vm_mappings.read().await;
+        mappings.get(&key).map(|m| m.vm_id)
+    };
+
     match provider
-        .get_or_create_vm(
+        .get_or_create_vm_with_persisted(
             &flow_id,
             &node_id,
             body.tier.as_deref(),
             body.api_key.as_deref(),
+            persisted_vm_id,
         )
         .await
     {

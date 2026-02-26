@@ -9,6 +9,7 @@ import type {
   SessionInfo,
   SavedPrompt,
   FlowSessionsInfo,
+  TemplateMetadata,
 } from "../types/flow";
 
 const DEFAULT_BASE_URL = "http://localhost:8081";
@@ -383,6 +384,78 @@ export async function deleteNodeVm(
   nodeId: string
 ): Promise<void> {
   await apiFetch(`/sandbox/vm/${flowId}/${nodeId}`, { method: "DELETE" });
+}
+
+// ---------------------------------------------------------------------------
+// Auth / Token management
+// ---------------------------------------------------------------------------
+
+export async function getTokenStatus(): Promise<{ has_token: boolean }> {
+  return apiFetch<{ has_token: boolean }>("/auth/token-status");
+}
+
+export async function refreshToken(): Promise<{ ok: boolean; message: string }> {
+  return apiFetch<{ ok: boolean; message: string }>("/auth/refresh-token", {
+    method: "POST",
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Template Gallery
+// ---------------------------------------------------------------------------
+
+/** Fetch all workflow templates (all categories). */
+export async function listTemplates(): Promise<TemplateMetadata[]> {
+  const data = await apiFetch<{ templates: TemplateMetadata[] }>("/templates");
+  return data.templates;
+}
+
+/** Fetch raw YAML for a single template. */
+export async function getTemplateYaml(
+  category: string,
+  slug: string
+): Promise<string> {
+  const url = `${getBaseUrl()}/api/templates/${category}/${slug}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`API error ${res.status}`);
+  return res.text();
+}
+
+/** Parse + save a template as a new Flow. Returns the created Flow. */
+export async function importTemplate(
+  category: string,
+  slug: string
+): Promise<Flow> {
+  return apiFetch<Flow>(`/templates/${category}/${slug}/import`, {
+    method: "POST",
+  });
+}
+
+export interface ImportResult {
+  flows: Flow[];
+  errors: { file: string; error: string }[];
+  total_found: number;
+  imported: number;
+}
+
+/** Upload raw YAML text and import it as a new Flow. */
+export async function importYaml(yaml: string): Promise<ImportResult> {
+  return apiFetch<ImportResult>("/templates/import-yaml", {
+    method: "POST",
+    body: JSON.stringify({ yaml }),
+  });
+}
+
+/** Fetch all workflow YAMLs from a GitHub repo and import them. */
+export async function importFromGithub(
+  repoUrl: string,
+  path = "",
+  branch = "main"
+): Promise<ImportResult> {
+  return apiFetch<ImportResult>("/templates/import-github", {
+    method: "POST",
+    body: JSON.stringify({ repo_url: repoUrl, path, branch }),
+  });
 }
 
 // ---------------------------------------------------------------------------

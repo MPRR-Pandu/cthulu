@@ -1,7 +1,9 @@
+pub mod auth_routes;
 pub mod flow_routes;
 pub mod middleware;
 pub mod prompt_routes;
 pub mod routes;
+pub mod template_routes;
 
 use axum::Router;
 use serde::{Deserialize, Serialize};
@@ -289,6 +291,8 @@ pub struct AppState {
     pub sessions_path: PathBuf,
     /// Base data directory (~/.cthulu) for attachments etc.
     pub data_dir: PathBuf,
+    /// Path to the `static/` directory (template YAML files live in `static/workflows/`).
+    pub static_dir: PathBuf,
     /// Persistent Claude CLI processes keyed by session key (flow_id::node_id).
     pub live_processes: Arc<Mutex<HashMap<String, LiveClaudeProcess>>>,
     /// Sandbox provider for isolated executor runs.
@@ -299,7 +303,8 @@ pub struct AppState {
     /// VM-to-node mappings persisted in sessions.yaml. Key: "flow_id::node_id".
     pub vm_mappings: Arc<RwLock<HashMap<String, VmMapping>>>,
     /// Claude OAuth access token (read from macOS Keychain or CLAUDE_CODE_OAUTH_TOKEN env).
-    pub oauth_token: Option<String>,
+    /// Wrapped in Arc<RwLock> so it can be refreshed at runtime without a restart.
+    pub oauth_token: Arc<RwLock<Option<String>>>,
 }
 
 impl AppState {

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import * as api from "../api/client";
 import { log } from "../api/logger";
 import type { FlowNode } from "../types/flow";
@@ -56,6 +56,8 @@ export default function TopBar({
   const [connected, setConnected] = useState(false);
   const [showValidationGate, setShowValidationGate] = useState(false);
   const [nextRun, setNextRun] = useState<string | null>(null);
+  const [tokenOk, setTokenOk] = useState<boolean | null>(null); // null = unknown
+  const [refreshing, setRefreshing] = useState(false);
   const retryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const connectedRef = useRef(false);
   const onReconnectRef = useRef(onReconnect);
@@ -115,6 +117,32 @@ export default function TopBar({
       cancelled = true;
       if (retryRef.current) clearTimeout(retryRef.current);
     };
+  }, []);
+
+  // Check token status whenever we connect (and on first load)
+  useEffect(() => {
+    if (!connected) return;
+    api.getTokenStatus()
+      .then((res) => setTokenOk(res.has_token))
+      .catch(() => setTokenOk(null));
+  }, [connected]);
+
+  const handleRefreshToken = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      const res = await api.refreshToken();
+      if (res.ok) {
+        setTokenOk(true);
+        log("info", "OAuth token refreshed successfully");
+      } else {
+        log("warn", `Token refresh failed: ${res.message}`);
+        alert(`Token refresh failed:\n\n${res.message}`);
+      }
+    } catch (e) {
+      log("error", `Token refresh error: ${(e as Error).message}`);
+    } finally {
+      setRefreshing(false);
+    }
   }, []);
 
   const handleRunClick = () => {
@@ -212,6 +240,24 @@ export default function TopBar({
           {errorCount > 0 && !consoleOpen && (
             <span className="error-badge">{errorCount}</span>
           )}
+        </button>
+        <button
+          className={tokenOk === false ? "topbar-token-btn expired" : "topbar-token-btn"}
+          onClick={handleRefreshToken}
+          disabled={refreshing || !connected}
+          title={
+            tokenOk === false
+              ? "OAuth token expired — click to refresh"
+              : tokenOk === true
+                ? "OAuth token active — click to refresh"
+                : "Token status unknown"
+          }
+        >
+          {refreshing
+            ? "Refreshing…"
+            : tokenOk === false
+              ? "⚠ Token Expired"
+              : "⟳ Token"}
         </button>
         <button className="ghost" onClick={onSettingsClick}>
           Settings

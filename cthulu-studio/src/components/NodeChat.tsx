@@ -4,6 +4,17 @@ import { startNodeInteract } from "../api/interactStream";
 import { log } from "../api/logger";
 import type { SessionInfo, OutputLine } from "../types/flow";
 
+function isAuthError(text: string): boolean {
+  return (
+    text.includes("authentication_error") ||
+    text.includes("OAuth token has expired") ||
+    text.includes("token has expired") ||
+    // Anthropic 401 response body pattern — avoid matching "401" in tool output
+    text.includes('"type":"authentication_error"') ||
+    /HTTP 401|status.*401|401.*Unauthorized/i.test(text)
+  );
+}
+
 // Persisted state for a single executor node chat
 export interface NodeChatState {
   session: SessionInfo | null;
@@ -78,6 +89,9 @@ export default function NodeChat({
   );
   const [running, setRunning] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [authError, setAuthError] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshMsg, setRefreshMsg] = useState<string | null>(null);
 
   const [inputHeight, setInputHeight] = useState(32);
 
@@ -209,9 +223,16 @@ export default function NodeChat({
                 { type: "cost", text: `Cost: $${(parsed.cost || 0).toFixed(4)} | Turns: ${parsed.turns || 0}` },
               ]);
               break;
-            case "error":
-              setOutputLines((prev) => [...prev, { type: "error", text: parsed.message || event.data }]);
+            case "error": {
+              const errMsg = parsed.message || event.data;
+              if (isAuthError(errMsg)) {
+                setAuthError(true);
+                // Kill the stale process on the backend so next send spawns fresh
+                api.stopNodeInteract(flowId, nodeId).catch(() => {});
+              }
+              setOutputLines((prev) => [...prev, { type: "error", text: errMsg }]);
               break;
+            }
           }
         } catch {
           setOutputLines((prev) => [...prev, { type: "text", text: event.data }]);
@@ -223,18 +244,50 @@ export default function NodeChat({
       },
       (err) => {
         setRunning(false);
-        setOutputLines((prev) => [
-          ...prev,
-          {
-            type: err.includes("409") ? "system" : "error",
-            text: err.includes("409") ? "Processing previous message... please wait." : `Stream error: ${err}`,
-          },
-        ]);
+        if (isAuthError(err)) {
+          setAuthError(true);
+          // Kill the stale process on the backend
+          api.stopNodeInteract(flowId, nodeId).catch(() => {});
+          setOutputLines((prev) => [
+            ...prev,
+            { type: "error", text: "Authentication failed: OAuth token has expired." },
+          ]);
+        } else {
+          setOutputLines((prev) => [
+            ...prev,
+            {
+              type: err.includes("409") ? "system" : "error",
+              text: err.includes("409") ? "Processing previous message... please wait." : `Stream error: ${err}`,
+            },
+          ]);
+        }
       }
     );
 
     abortRef.current = controller;
   }, [sessionId, running, prompt, flowId, nodeId]);
+
+  const handleRefreshToken = useCallback(async () => {
+    setRefreshing(true);
+    setRefreshMsg(null);
+    try {
+      const result = await api.refreshToken();
+      if (result.ok) {
+        setAuthError(false);
+        setRefreshMsg(null);
+        setOutputLines((prev) => [
+          ...prev,
+          { type: "system", text: "Token refreshed. You can now send messages again." },
+        ]);
+      } else {
+        setRefreshMsg(result.message);
+      }
+    } catch (e) {
+      setRefreshMsg(`Refresh failed: ${(e as Error).message}`);
+    } finally {
+      setRefreshing(false);
+    }
+  }, []);
 
   const handleStop = () => {
     abortRef.current?.abort();
@@ -287,6 +340,34 @@ export default function NodeChat({
           </div>
         ))}
       </div>
+      {authError && (
+        <div className="node-chat-auth-error">
+          <span className="node-chat-auth-error-icon">⚠</span>
+          <span className="node-chat-auth-error-text">
+            OAuth token expired.{" "}
+            {refreshMsg && <span className="node-chat-auth-error-hint">{refreshMsg}</span>}
+            {!refreshMsg && (
+              <span className="node-chat-auth-error-hint">
+                Run <code>claude</code> in your terminal to re-authenticate, then click Refresh.
+              </span>
+            )}
+          </span>
+          <button
+            className="node-chat-auth-refresh"
+            onClick={handleRefreshToken}
+            disabled={refreshing}
+          >
+            {refreshing ? "Refreshing…" : "Refresh Token"}
+          </button>
+          <button
+            className="node-chat-auth-dismiss"
+            onClick={() => { setAuthError(false); setRefreshMsg(null); }}
+            title="Dismiss"
+          >
+            ✕
+          </button>
+        </div>
+      )}
       <div className="node-chat-input-drag" onMouseDown={handleInputDragStart} />
       <div className="node-chat-input">
         <textarea

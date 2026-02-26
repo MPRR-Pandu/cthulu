@@ -1,0 +1,56 @@
+meta:
+  title: "PR Code Review"
+  description: "Automated GitHub PR code review — posts inline comments and verdict via Claude"
+  tags: [github, pr-review, github-pr]
+  estimated_cost: "~$0.05 / run"
+  icon: "🔎"
+
+name: pr-review
+description: Automated PR code review via Claude Code — posts review comments to GitHub
+enabled: false
+
+trigger:
+  kind: github-pr
+  config:
+    repos:
+      - slug: owner/repo
+        path: "."
+    poll_interval: 60
+    skip_drafts: true
+    review_on_push: false
+    max_diff_size: 50000
+
+executors:
+  - kind: claude-code
+    label: "Claude: pr-review"
+    config:
+      prompt: |
+        You are an expert code reviewer. Review the following pull request and provide
+        detailed, constructive feedback.
+
+        PR: #{{pr_number}} — {{pr_title}}
+        Repo: {{repo}}
+        Branch: {{head_ref}} → {{base_ref}}
+        Review type: {{review_type}}
+
+        Diff:
+        {{diff}}
+
+        Use the `gh` CLI to post your review. Your review should:
+        1. Post inline comments on specific lines using `gh api` for any issues found
+        2. End with a summary comment using `gh pr review {{pr_number}} --repo {{repo}}`
+           with either `--approve`, `--request-changes`, or `--comment`
+
+        Focus on:
+        - Correctness and logic errors
+        - Security vulnerabilities
+        - Performance concerns
+        - Code style and maintainability
+        - Missing tests or documentation
+
+        Be constructive and specific. Reference line numbers where relevant.
+      permissions:
+        - Bash
+        - Read
+        - Grep
+        - Glob

@@ -151,7 +151,7 @@ pub(crate) async fn update_flow(
         if let Some(vm_manager) = &state.vm_manager {
             if flow.enabled {
                 // Flow was enabled — provision VMs for all executor nodes
-                let oauth = state.oauth_token.clone();
+                let oauth_arc = state.oauth_token.clone();
                 let vm_mgr = vm_manager.clone();
                 let flow_clone = flow.clone();
                 let vm_mappings = state.vm_mappings.clone();
@@ -159,7 +159,9 @@ pub(crate) async fn update_flow(
                 let interact_sessions = state.interact_sessions.clone();
 
                 tokio::spawn(async move {
-                    match vm_mgr.provision_flow_vms(&flow_clone, oauth.as_deref()).await {
+                    let oauth = oauth_arc.read().await.clone();
+                    let credentials_json = crate::server::auth_routes::read_full_credentials();
+                    match vm_mgr.provision_flow_vms(&flow_clone, oauth.as_deref(), credentials_json.as_deref()).await {
                         Ok(results) => {
                             let mut map = vm_mappings.write().await;
                             for (node_id, vm_name, vm) in results {

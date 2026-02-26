@@ -1,0 +1,68 @@
+meta:
+  title: "Social Listening Brief"
+  description: "Aggregate brand and competitor mentions from multiple sources into a weekly report"
+  tags: [social, listening, rss, notion, cron]
+  estimated_cost: "~$0.05 / run"
+  icon: "👂"
+
+name: social-listening-brief
+description: Aggregate brand and competitor mentions into a weekly social listening report
+enabled: false
+
+trigger:
+  kind: cron
+  config:
+    schedule: "0 8 * * 1"
+    working_dir: "."
+
+sources:
+  - kind: web-scrape
+    label: "Reddit: r/bitcoin"
+    config:
+      url: "https://www.reddit.com/r/bitcoin/new/.rss"
+      keywords:
+        - brand
+        - competitor
+        - mention
+
+  - kind: rss
+    label: "Google Alerts RSS"
+    config:
+      url: "https://www.google.com/alerts/feeds/REPLACE_WITH_YOUR_ALERT_ID/REPLACE_WITH_FEED_KEY"
+      limit: 20
+
+executors:
+  - kind: claude-code
+    label: "Claude: social-listening"
+    config:
+      prompt: |
+        You are a brand intelligence analyst. Based on the following mentions and discussions,
+        create a weekly social listening report.
+
+        Mentions:
+        {{content}}
+
+        Produce a report with:
+        ## Social Listening Report — {{timestamp}}
+
+        **Volume Summary**
+        (How many mentions, from what types of sources?)
+
+        **Top Discussions**
+        (3-5 key topics being discussed, with context)
+
+        **Sentiment Overview**
+        (Overall tone toward the subject: positive / neutral / negative)
+
+        **Action Items**
+        (2-3 recommended actions based on what you found)
+
+        Keep total length under 500 words. Be analytical, not promotional.
+      permissions:
+        - Read
+
+sinks:
+  - kind: notion
+    config:
+      token_env: NOTION_TOKEN
+      database_id: "REPLACE_WITH_YOUR_NOTION_DATABASE_UUID"

@@ -1,0 +1,76 @@
+meta:
+  title: "Crypto News Brief"
+  description: "Daily crypto digest from top RSS feeds, delivered to Slack every 4 hours"
+  tags: [crypto, rss, slack, cron]
+  estimated_cost: "~$0.03 / run"
+  icon: "📰"
+
+name: crypto-news-brief
+description: Daily crypto digest from top RSS feeds delivered to Slack every 4 hours
+enabled: false
+
+trigger:
+  kind: cron
+  config:
+    schedule: "0 */4 * * *"
+    working_dir: "."
+
+sources:
+  - kind: rss
+    label: "RSS: thedefiant.io"
+    config:
+      url: "https://thedefiant.io/feed"
+      limit: 10
+
+  - kind: rss
+    label: "RSS: blockworks.co"
+    config:
+      url: "https://blockworks.co/feed"
+      limit: 10
+
+  - kind: rss
+    label: "RSS: dlnews.com"
+    config:
+      url: "https://www.dlnews.com/feed/"
+      limit: 10
+
+filters:
+  - kind: keyword
+    config:
+      keywords:
+        - bitcoin
+        - ethereum
+        - crypto
+        - defi
+        - regulation
+      require_all: false
+      field: title_or_summary
+
+executors:
+  - kind: claude-code
+    label: "Claude: crypto_news_brief.md"
+    config:
+      prompt: |
+        You are a crypto news analyst. Based on the following news items, produce a concise
+        daily brief suitable for a professional audience.
+
+        Items:
+        {{content}}
+
+        Format your response as:
+        ## Crypto Brief — {{timestamp}}
+
+        **Top Stories** (3-5 bullet points of the most important items)
+
+        **Market Signals** (key themes or trends across the items)
+
+        **To Watch** (1-2 items worth monitoring)
+
+        Keep the brief under 400 words. Be factual and neutral.
+      permissions:
+        - Read
+
+sinks:
+  - kind: slack
+    config:
+      webhook_url_env: SLACK_WEBHOOK_URL

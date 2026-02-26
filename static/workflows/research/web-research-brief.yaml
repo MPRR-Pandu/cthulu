@@ -1,0 +1,76 @@
+meta:
+  title: "Web Research Brief"
+  description: "Triggered manually — scrape a topic across multiple sources and produce a research brief"
+  tags: [research, web-scrape, manual, notion]
+  estimated_cost: "~$0.08 / run"
+  icon: "📖"
+
+name: web-research-brief
+description: On-demand research brief from web scraping across multiple sources
+enabled: false
+
+trigger:
+  kind: manual
+  config: {}
+
+sources:
+  - kind: web-scrape
+    label: "Scrape: source 1"
+    config:
+      url: "https://example.com/topic"
+      keywords: []
+
+  - kind: web-scrape
+    label: "Scrape: source 2"
+    config:
+      url: "https://example2.com/topic"
+      keywords: []
+
+  - kind: rss
+    label: "RSS: related feed"
+    config:
+      url: "https://example.com/feed"
+      limit: 15
+
+executors:
+  - kind: claude-code
+    label: "Claude: research-brief"
+    config:
+      prompt: |
+        You are a research analyst. Based on the following sources, produce a comprehensive
+        research brief on the topic.
+
+        Sources:
+        {{content}}
+
+        Structure your brief as:
+        ## Research Brief — {{timestamp}}
+
+        ### Executive Summary
+        (3-5 sentences summarizing the key findings)
+
+        ### Key Findings
+        (5-8 numbered findings with supporting evidence)
+
+        ### Differing Perspectives
+        (Where do sources disagree? What are the main debate points?)
+
+        ### Data & Evidence
+        (Notable statistics, quotes, or data points found)
+
+        ### Gaps & Unknowns
+        (What is NOT well-covered in the available sources?)
+
+        ### Recommendations
+        (3-5 actionable recommendations or next steps)
+
+        Be thorough, cite sources, and remain objective. Total: 800-1200 words.
+      permissions:
+        - Read
+        - WebFetch
+
+sinks:
+  - kind: notion
+    config:
+      token_env: NOTION_TOKEN
+      database_id: "REPLACE_WITH_YOUR_NOTION_DATABASE_UUID"

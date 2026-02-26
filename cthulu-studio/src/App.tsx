@@ -212,6 +212,15 @@ export default function App() {
     } catch { /* logged */ }
   };
 
+  // Called when the user imports a template from the gallery.
+  // The flow has already been saved by the backend; we just reload and navigate.
+  const handleImportTemplate = async (flow: import("./types/flow").Flow) => {
+    try {
+      await loadFlows();
+      await selectFlow(flow.id);
+    } catch { /* logged */ }
+  };
+
   // --- Snapshot callback: Canvas pushes state here for persistence ---
   const handleFlowSnapshot = useCallback((snapshot: { nodes: FlowNode[]; edges: FlowEdge[] }) => {
     latestSnapshotRef.current = snapshot;
@@ -402,6 +411,7 @@ export default function App() {
               activeFlowId={activeFlowId}
               onSelect={selectFlow}
               onCreate={createFlow}
+              onImportTemplate={handleImportTemplate}
               onToggleEnabled={handleToggleFlowEnabled}
             />
           </div>

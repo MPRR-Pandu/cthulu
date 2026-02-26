@@ -52,6 +52,11 @@ impl VmManagerProvider {
     /// Get or create a VM for a given executor node.
     ///
     /// Each executor node gets its own VM, keyed by `flow_id::node_id`.
+    /// Lookup order:
+    ///   1. In-memory `node_vms` map (same server session, fast path).
+    ///   2. `persisted_vm_id` — vm_id from sessions.yaml passed by the caller.
+    ///      Verifies the VM is still alive and re-seeds `node_vms` if so.
+    ///   3. Create a new VM if neither source yields a live VM.
     pub async fn get_or_create_vm(
         &self,
         flow_id: &str,
@@ -59,20 +64,32 @@ impl VmManagerProvider {
         tier: Option<&str>,
         api_key: Option<&str>,
     ) -> Result<VmResponse, SandboxError> {
+        self.get_or_create_vm_with_persisted(flow_id, node_id, tier, api_key, None).await
+    }
+
+    /// Same as `get_or_create_vm` but accepts an optional persisted `vm_id`
+    /// (from `vm_mappings` / sessions.yaml) so we can reconnect after restart.
+    pub async fn get_or_create_vm_with_persisted(
+        &self,
+        flow_id: &str,
+        node_id: &str,
+        tier: Option<&str>,
+        api_key: Option<&str>,
+        persisted_vm_id: Option<u32>,
+    ) -> Result<VmResponse, SandboxError> {
         let key = node_vm_key(flow_id, node_id);
 
-        // Check if VM already exists for this node
+        // 1. Check in-memory node_vms map (fast path — same server session)
         {
             let map = self.node_vms.read().await;
             if let Some(vm) = map.get(&key) {
-                // Verify it's still alive
                 match self.client.get_vm(vm.vm_id).await {
                     Ok(live_vm) => {
                         tracing::debug!(
                             flow_id = %flow_id,
                             node_id = %node_id,
                             vm_id = live_vm.vm_id,
-                            "reusing existing VM for node"
+                            "reusing existing VM for node (in-memory)"
                         );
                         return Ok(live_vm);
                     }
@@ -81,12 +98,39 @@ impl VmManagerProvider {
                             flow_id = %flow_id,
                             node_id = %node_id,
                             vm_id = vm.vm_id,
-                            "VM was deleted externally, will create new one"
+                            "VM was deleted externally, will try persisted or create new one"
                         );
-                        // Fall through to create a new one
+                        // Fall through
                     }
                     Err(e) => return Err(e),
                 }
+            }
+        }
+
+        // 2. Try to restore from persisted vm_id (after server restart)
+        if let Some(vm_id) = persisted_vm_id {
+            match self.client.get_vm(vm_id).await {
+                Ok(live_vm) => {
+                    tracing::info!(
+                        flow_id = %flow_id,
+                        node_id = %node_id,
+                        vm_id = vm_id,
+                        "reconnected to existing VM from sessions.yaml"
+                    );
+                    let mut map = self.node_vms.write().await;
+                    map.insert(key, live_vm.clone());
+                    return Ok(live_vm);
+                }
+                Err(SandboxError::NotFound(_)) => {
+                    tracing::warn!(
+                        flow_id = %flow_id,
+                        node_id = %node_id,
+                        vm_id = vm_id,
+                        "persisted VM no longer exists, creating new one"
+                    );
+                    // Fall through to create
+                }
+                Err(e) => return Err(e),
             }
         }
 
@@ -122,11 +166,36 @@ impl VmManagerProvider {
         Ok(vm)
     }
 
-    /// Get the VM for an executor node (if one exists).
+    /// Get the VM for an executor node (if one exists in the in-memory map).
     pub async fn get_node_vm(&self, flow_id: &str, node_id: &str) -> Option<VmResponse> {
         let key = node_vm_key(flow_id, node_id);
         let map = self.node_vms.read().await;
         map.get(&key).cloned()
+    }
+
+    /// Re-populate the in-memory node_vms map from a persisted vm_id.
+    ///
+    /// Called by the `get_node_vm` API handler after a server restart when
+    /// `node_vms` is empty but `vm_mappings` (from sessions.yaml) still has
+    /// the old vm_id. Verifies the VM is still alive, seeds node_vms, and
+    /// returns the live VmResponse.
+    pub async fn restore_node_vm(
+        &self,
+        flow_id: &str,
+        node_id: &str,
+        vm_id: u32,
+    ) -> Result<VmResponse, SandboxError> {
+        let vm = self.client.get_vm(vm_id).await?;
+        let key = node_vm_key(flow_id, node_id);
+        let mut map = self.node_vms.write().await;
+        map.insert(key, vm.clone());
+        tracing::info!(
+            flow_id = %flow_id,
+            node_id = %node_id,
+            vm_id = vm_id,
+            "restored VM mapping from sessions.yaml into node_vms"
+        );
+        Ok(vm)
     }
 
     /// Destroy the VM for an executor node.
@@ -157,10 +226,15 @@ impl VmManagerProvider {
 
     /// Create VMs for all executor nodes in a flow.
     /// Returns `Vec<(node_id, vm_name, VmResponse)>` for each provisioned VM.
+    ///
+    /// `oauth_token`      — the raw access token string (for CLAUDE_CODE_OAUTH_TOKEN env var).
+    /// `credentials_json` — full Keychain JSON blob (written to ~/.claude/.credentials.json
+    ///                       so Claude CLI skips the login prompt). Pass None on non-macOS.
     pub async fn provision_flow_vms(
         &self,
         flow: &crate::flows::Flow,
         oauth_token: Option<&str>,
+        credentials_json: Option<&str>,
     ) -> Result<Vec<(String, String, crate::sandbox::vm_manager::VmResponse)>, SandboxError> {
         use crate::flows::NodeType;
 
@@ -191,9 +265,11 @@ impl VmManagerProvider {
                 "provisioned VM for executor node"
             );
 
-            // Inject OAuth token if available
+            // Inject OAuth credentials if available.
+            // Passes both the access token (for env var) and the full credentials JSON
+            // (for ~/.claude/.credentials.json) so Claude CLI skips the login prompt.
             if let Some(token) = oauth_token {
-                if let Err(e) = inject_oauth_token(&vm.web_terminal, token).await {
+                if let Err(e) = inject_oauth_token(&vm.web_terminal, token, credentials_json).await {
                     tracing::warn!(
                         vm_id = vm.vm_id,
                         vm_name = %vm_name,
@@ -240,38 +316,71 @@ impl VmManagerProvider {
     }
 }
 
+/// Public re-export so auth_routes can call this on token refresh.
+/// `access_token`    — the raw OAuth access token string (for CLAUDE_CODE_OAUTH_TOKEN env).
+/// `credentials_json` — full JSON blob from the Keychain (written to ~/.claude/.credentials.json).
+///                      If None, only the env var is written (fallback for non-macOS).
+pub async fn inject_oauth_token_pub(
+    web_terminal_url: &str,
+    access_token: &str,
+    credentials_json: Option<&str>,
+) -> Result<(), SandboxError> {
+    inject_oauth_token(web_terminal_url, access_token, credentials_json).await
+}
+
 /// Inject a Claude OAuth token into a VM via its ttyd web terminal WebSocket.
 ///
 /// Uses `TtydSession` to connect, then:
-/// 1. Sets `CLAUDE_CODE_OAUTH_TOKEN` env var in `~/.bashrc`
-/// 2. Writes `~/.claude/.credentials.json` for Claude CLI
+/// 1. Sets `CLAUDE_CODE_OAUTH_TOKEN` env var in `~/.bashrc` (replacing any existing line)
+/// 2. Writes the full `~/.claude/.credentials.json` so Claude CLI skips the login prompt
+///
+/// `access_token`     — the raw token string for the env var.
+/// `credentials_json` — full JSON blob from Keychain (all fields: accessToken, refreshToken,
+///                       expiresAt, scopes, subscriptionType, rateLimitTier). If None, a
+///                       minimal credentials file is written from the access token alone.
 ///
 /// Uses base64 encoding to avoid shell quoting issues with special characters.
-async fn inject_oauth_token(web_terminal_url: &str, token: &str) -> Result<(), SandboxError> {
+async fn inject_oauth_token(
+    web_terminal_url: &str,
+    access_token: &str,
+    credentials_json: Option<&str>,
+) -> Result<(), SandboxError> {
     use crate::sandbox::ttyd::TtydSession;
 
     let mut session = TtydSession::connect(web_terminal_url).await?;
     let timeout = std::time::Duration::from_secs(10);
 
-    // Step 1: Write CLAUDE_CODE_OAUTH_TOKEN to .bashrc via base64 to avoid quoting issues
-    let bashrc_line = format!("export CLAUDE_CODE_OAUTH_TOKEN='{}'", token);
+    // Step 1: Write CLAUDE_CODE_OAUTH_TOKEN to .bashrc via base64, always replacing
+    // the existing line so that token refreshes work correctly.
+    let bashrc_line = format!("export CLAUDE_CODE_OAUTH_TOKEN='{}'", access_token);
     let bashrc_b64 = base64_encode_simple(bashrc_line.as_bytes());
     let cmd1 = format!(
-        "grep -q 'CLAUDE_CODE_OAUTH_TOKEN' ~/.bashrc 2>/dev/null || echo '{}' | base64 -d >> ~/.bashrc",
+        "sed -i '/CLAUDE_CODE_OAUTH_TOKEN/d' ~/.bashrc 2>/dev/null; echo '{}' | base64 -d >> ~/.bashrc",
         bashrc_b64
     );
     if let Err(e) = session.exec(&cmd1, timeout).await {
         tracing::warn!(error = %e, "Failed to write token to .bashrc");
     }
 
-    // Step 2: Create .claude dir and write credentials.json via base64
-    let credentials_json = serde_json::json!({
-        "claudeAiOauth": {
-            "accessToken": token,
-            "scopes": ["user:inference"],
-        }
-    });
-    let creds_str = serde_json::to_string(&credentials_json).unwrap_or_default();
+    // Step 2: Write the full credentials.json so Claude CLI skips the login prompt.
+    // Use the complete Keychain blob when available (has refreshToken, expiresAt,
+    // subscriptionType, rateLimitTier — all fields Claude CLI validates).
+    // Fall back to a minimal stub when only the access token is available.
+    let creds_str = if let Some(full_json) = credentials_json {
+        full_json.to_string()
+    } else {
+        serde_json::json!({
+            "claudeAiOauth": {
+                "accessToken": access_token,
+                "refreshToken": "",
+                "expiresAt": 9999999999999_u64,
+                "scopes": ["user:inference", "user:mcp_servers", "user:profile", "user:sessions:claude_code"],
+                "subscriptionType": "team",
+                "rateLimitTier": "default_claude_max_5x"
+            }
+        })
+        .to_string()
+    };
     let creds_b64 = base64_encode_simple(creds_str.as_bytes());
     let cmd2 = format!(
         "mkdir -p ~/.claude && echo '{}' | base64 -d > ~/.claude/.credentials.json && chmod 600 ~/.claude/.credentials.json",

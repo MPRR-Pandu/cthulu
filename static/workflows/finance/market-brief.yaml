@@ -1,0 +1,64 @@
+meta:
+  title: "Market Brief"
+  description: "Daily crypto market snapshot with BTC/ETH prices and Fear & Greed index, posted to Slack"
+  tags: [finance, market, slack, cron]
+  estimated_cost: "~$0.02 / run"
+  icon: "📊"
+
+name: market-brief
+description: Daily crypto market snapshot with prices and sentiment indicators
+enabled: false
+
+trigger:
+  kind: cron
+  config:
+    schedule: "0 8 * * *"
+    working_dir: "."
+
+sources:
+  - kind: market-data
+    label: "Market Snapshot"
+
+  - kind: rss
+    label: "RSS: coindesk.com"
+    config:
+      url: "https://www.coindesk.com/arc/outboundfeeds/rss/"
+      limit: 5
+
+executors:
+  - kind: claude-code
+    label: "Claude: market-brief"
+    config:
+      prompt: |
+        You are a crypto market analyst. Using the market data and latest headlines,
+        produce a concise daily market brief.
+
+        Market data:
+        {{market_data}}
+
+        Latest headlines:
+        {{content}}
+
+        Format:
+        ## Market Brief — {{timestamp}}
+
+        **Prices**
+        (BTC and ETH with 24h change context)
+
+        **Sentiment**
+        (Fear & Greed interpretation — what does today's reading suggest?)
+
+        **Market Narrative**
+        (1-2 sentences on what is driving price action today based on headlines)
+
+        **Key Levels to Watch**
+        (Any important technical or psychological price levels mentioned in news)
+
+        Keep under 200 words. Be factual and concise.
+      permissions:
+        - Read
+
+sinks:
+  - kind: slack
+    config:
+      webhook_url_env: SLACK_WEBHOOK_URL

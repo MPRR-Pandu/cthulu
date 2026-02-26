@@ -1,0 +1,77 @@
+meta:
+  title: "Product Updates Digest"
+  description: "Weekly digest of product changelog posts from monitored blogs, posted to Slack"
+  tags: [product, web-scrape, slack, cron]
+  estimated_cost: "~$0.04 / run"
+  icon: "🚀"
+
+name: product-updates-digest
+description: Weekly digest of product changelog posts from monitored blogs
+enabled: false
+
+trigger:
+  kind: cron
+  config:
+    schedule: "0 9 * * 5"
+    working_dir: "."
+
+sources:
+  - kind: web-scraper
+    label: "Scrape: changelog.com"
+    config:
+      url: "https://changelog.com/posts"
+      items_selector: "article"
+      title_selector: "h2 a"
+      url_selector: "h2 a"
+      summary_selector: "p"
+      limit: 10
+
+  - kind: rss
+    label: "RSS: github blog"
+    config:
+      url: "https://github.blog/feed/"
+      limit: 10
+
+filters:
+  - kind: keyword
+    config:
+      keywords:
+        - release
+        - launch
+        - update
+        - new feature
+        - announcement
+      require_all: false
+      field: title_or_summary
+
+executors:
+  - kind: claude-code
+    label: "Claude: product-updates"
+    config:
+      prompt: |
+        You are a product intelligence analyst. Review these product updates and releases,
+        then create a concise weekly digest.
+
+        Updates:
+        {{content}}
+
+        Format:
+        ## Product Updates — Week of {{timestamp}}
+
+        **Notable Launches**
+        (Top 2-3 most significant product releases with brief context)
+
+        **Feature Updates**
+        (3-5 meaningful feature additions worth noting)
+
+        **Trends**
+        (What themes are emerging across product updates this week?)
+
+        Keep each item to 1-2 sentences. Total: under 350 words.
+      permissions:
+        - Read
+
+sinks:
+  - kind: slack
+    config:
+      webhook_url_env: SLACK_WEBHOOK_URL

@@ -1,0 +1,77 @@
+meta:
+  title: "Twitter Topic Monitor"
+  description: "Monitor Twitter/X via RSS proxies for keyword mentions, summarize daily to Slack"
+  tags: [social, twitter, rss, slack, cron]
+  estimated_cost: "~$0.02 / run"
+  icon: "🐦"
+
+name: twitter-topic-monitor
+description: Monitor Twitter/X keyword mentions via RSS proxies and summarize daily to Slack
+enabled: false
+
+trigger:
+  kind: cron
+  config:
+    schedule: "0 9 * * *"
+    working_dir: "."
+
+sources:
+  - kind: rss
+    label: "Nitter: bitcoin mentions"
+    config:
+      url: "https://nitter.net/search/rss?q=bitcoin+regulation&f=tweets"
+      limit: 30
+
+  - kind: rss
+    label: "Nitter: crypto policy"
+    config:
+      url: "https://nitter.net/search/rss?q=crypto+policy&f=tweets"
+      limit: 30
+
+filters:
+  - kind: keyword
+    config:
+      keywords:
+        - regulation
+        - policy
+        - SEC
+        - legislation
+        - ban
+        - approve
+      require_all: false
+      field: title_or_summary
+
+executors:
+  - kind: claude-code
+    label: "Claude: social-monitor"
+    config:
+      prompt: |
+        You are a social media analyst tracking crypto regulatory discourse on Twitter/X.
+        Review the following posts and produce a daily social sentiment summary.
+
+        Posts:
+        {{content}}
+
+        Format:
+        ## Twitter Pulse — {{timestamp}}
+
+        **Dominant Narrative**
+        (1-2 sentences: what is the main conversation today?)
+
+        **Key Voices**
+        (2-3 notable or high-signal posts summarized)
+
+        **Sentiment**
+        (Overall tone: bullish / bearish / neutral / uncertain — with brief reasoning)
+
+        **Watch**
+        (Any emerging narratives or discussions gaining traction)
+
+        Keep under 300 words. Avoid speculation; stick to what is actually being discussed.
+      permissions:
+        - Read
+
+sinks:
+  - kind: slack
+    config:
+      webhook_url_env: SLACK_WEBHOOK_URL

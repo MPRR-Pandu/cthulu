@@ -15,9 +15,11 @@ use tokio_stream::wrappers::LinesStream;
 use tokio_stream::StreamExt;
 use tower_http::cors::{Any, CorsLayer};
 
+use super::auth_routes;
 use super::flow_routes;
 use super::middleware;
 use super::prompt_routes;
+use super::template_routes;
 use super::AppState;
 
 pub fn build_router(state: AppState) -> Router {
@@ -40,6 +42,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/claude", post(run_claude))
         .nest("/api", flow_routes::flow_router())
         .nest("/api", prompt_routes::prompt_router())
+        .nest("/api", template_routes::template_router())
+        .nest("/api", auth_routes::auth_router())
         .fallback(not_found)
         .with_state(state)
         .layer(cors)

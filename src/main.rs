@@ -4,6 +4,7 @@ mod github;
 mod sandbox;
 mod server;
 mod tasks;
+mod templates;
 mod tui;
 
 use anyhow::{Context, Result};
@@ -300,6 +301,28 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
         scheduler.start_all().await;
     }
 
+    // Resolve static/ directory: prefer CTHULU_STATIC_DIR env var,
+    // then look relative to the current working directory (repo root during dev),
+    // then fall back to the binary's directory.
+    let static_dir = std::env::var("CTHULU_STATIC_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| {
+            let cwd_static = std::env::current_dir()
+                .unwrap_or_else(|_| ".".into())
+                .join("static");
+            if cwd_static.exists() {
+                cwd_static
+            } else {
+                // Try next to the binary
+                std::env::current_exe()
+                    .ok()
+                    .and_then(|p| p.parent().map(|d| d.join("static")))
+                    .unwrap_or_else(|| std::path::PathBuf::from("static"))
+            }
+        });
+
+    tracing::info!(path = %static_dir.display(), "static directory");
+
     let app_state = server::AppState {
         github_client,
         http_client,
@@ -309,11 +332,12 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
         interact_sessions: Arc::new(tokio::sync::RwLock::new(persisted_sessions)),
         sessions_path,
         data_dir: base_dir,
+        static_dir,
         live_processes: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         sandbox_provider,
         vm_manager: vm_manager_arc,
         vm_mappings,
-        oauth_token,
+        oauth_token: Arc::new(tokio::sync::RwLock::new(oauth_token)),
     };
 
     let app = server::create_app(app_state)

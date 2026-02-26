@@ -9,14 +9,28 @@ pub struct Config {
 
 impl Config {
     pub fn from_env() -> Self {
-        let port = std::env::var("PORT")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(8081);
+        Self::from_raw_values(
+            std::env::var("PORT").ok().as_deref(),
+            std::env::var("SENTRY_DSN").ok().as_deref(),
+            std::env::var("ENVIRONMENT").ok().as_deref(),
+        )
+    }
 
-        let sentry_dsn = std::env::var("SENTRY_DSN").ok().filter(|s| !s.is_empty());
+    /// Build a Config from raw string values (as they would come from env vars).
+    /// Used directly in tests to avoid mutating process-global environment.
+    pub fn from_raw_values(
+        port: Option<&str>,
+        sentry_dsn: Option<&str>,
+        environment: Option<&str>,
+    ) -> Self {
+        let port = port.and_then(|v| v.parse().ok()).unwrap_or(8081);
 
-        let environment = std::env::var("ENVIRONMENT").unwrap_or_else(|_| "local".to_string());
+        let sentry_dsn = sentry_dsn.filter(|s| !s.is_empty()).map(String::from);
+
+        let environment = environment
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+            .unwrap_or_else(|| "local".to_string());
 
         Config {
             port,
@@ -105,17 +119,37 @@ mod tests {
 
     #[test]
     fn test_config_invalid_port_uses_default() {
-        unsafe { std::env::set_var("PORT", "not-a-number"); }
-        let config = Config::from_env();
+        let config = Config::from_raw_values(Some("not-a-number"), None, None);
         assert_eq!(config.port, 8081);
-        unsafe { std::env::remove_var("PORT"); }
+    }
+
+    #[test]
+    fn test_config_valid_port() {
+        let config = Config::from_raw_values(Some("3000"), None, None);
+        assert_eq!(config.port, 3000);
     }
 
     #[test]
     fn test_config_empty_sentry_dsn_is_none() {
-        unsafe { std::env::set_var("SENTRY_DSN", ""); }
-        let config = Config::from_env();
+        let config = Config::from_raw_values(None, Some(""), None);
         assert!(config.sentry_dsn.is_none());
-        unsafe { std::env::remove_var("SENTRY_DSN"); }
+    }
+
+    #[test]
+    fn test_config_present_sentry_dsn() {
+        let config = Config::from_raw_values(None, Some("https://sentry.io/123"), None);
+        assert_eq!(config.sentry_dsn.as_deref(), Some("https://sentry.io/123"));
+    }
+
+    #[test]
+    fn test_config_default_environment() {
+        let config = Config::from_raw_values(None, None, None);
+        assert_eq!(config.environment, "local");
+    }
+
+    #[test]
+    fn test_config_custom_environment() {
+        let config = Config::from_raw_values(None, None, Some("production"));
+        assert_eq!(config.environment, "production");
     }
 }

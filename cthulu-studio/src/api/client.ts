@@ -9,6 +9,7 @@ import type {
   SessionInfo,
   SavedPrompt,
   FlowSessionsInfo,
+  TemplateMetadata,
 } from "../types/flow";
 
 const DEFAULT_BASE_URL = "http://localhost:8081";
@@ -135,6 +136,17 @@ export async function getFlowRuns(id: string): Promise<FlowRun[]> {
 export async function getNodeTypes(): Promise<NodeTypeSchema[]> {
   const data = await apiFetch<{ node_types: NodeTypeSchema[] }>("/node-types");
   return data.node_types;
+}
+
+export interface PromptFile {
+  path: string;
+  filename: string;
+  title: string;
+}
+
+export async function listPromptFiles(): Promise<PromptFile[]> {
+  const data = await apiFetch<{ files: PromptFile[] }>("/prompt-files");
+  return data.files;
 }
 
 export async function getSession(flowId: string): Promise<SessionInfo> {
@@ -322,6 +334,133 @@ export async function validateCron(expression: string): Promise<CronValidation> 
     body: JSON.stringify({ expression }),
   });
 }
+
+// ---------------------------------------------------------------------------
+// VM Manager (Sandbox) API
+// ---------------------------------------------------------------------------
+
+export interface VmInfo {
+  vm_id: number;
+  tier: string;
+  guest_ip: string;
+  ssh_port: number;
+  web_port: number;
+  ssh_command: string;
+  web_terminal: string;
+  pid: number;
+}
+
+/** Get VM info for an executor node (returns null if no VM exists). */
+export async function getNodeVm(
+  flowId: string,
+  nodeId: string
+): Promise<VmInfo | null> {
+  try {
+    return await apiFetch<VmInfo>(`/sandbox/vm/${flowId}/${nodeId}`);
+  } catch {
+    return null;
+  }
+}
+
+/** Create (or get existing) VM for an executor node. */
+export async function createNodeVm(
+  flowId: string,
+  nodeId: string,
+  tier?: string,
+  apiKey?: string
+): Promise<VmInfo> {
+  return apiFetch<VmInfo>(`/sandbox/vm/${flowId}/${nodeId}`, {
+    method: "POST",
+    body: JSON.stringify({
+      tier: tier || undefined,
+      api_key: apiKey || undefined,
+    }),
+  });
+}
+
+/** Destroy the VM for an executor node. */
+export async function deleteNodeVm(
+  flowId: string,
+  nodeId: string
+): Promise<void> {
+  await apiFetch(`/sandbox/vm/${flowId}/${nodeId}`, { method: "DELETE" });
+}
+
+// ---------------------------------------------------------------------------
+// Auth / Token management
+// ---------------------------------------------------------------------------
+
+export async function getTokenStatus(): Promise<{ has_token: boolean }> {
+  return apiFetch<{ has_token: boolean }>("/auth/token-status");
+}
+
+export async function refreshToken(): Promise<{ ok: boolean; message: string }> {
+  return apiFetch<{ ok: boolean; message: string }>("/auth/refresh-token", {
+    method: "POST",
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Template Gallery
+// ---------------------------------------------------------------------------
+
+/** Fetch all workflow templates (all categories). */
+export async function listTemplates(): Promise<TemplateMetadata[]> {
+  const data = await apiFetch<{ templates: TemplateMetadata[] }>("/templates");
+  return data.templates;
+}
+
+/** Fetch raw YAML for a single template. */
+export async function getTemplateYaml(
+  category: string,
+  slug: string
+): Promise<string> {
+  const url = `${getBaseUrl()}/api/templates/${category}/${slug}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`API error ${res.status}`);
+  return res.text();
+}
+
+/** Parse + save a template as a new Flow. Returns the created Flow. */
+export async function importTemplate(
+  category: string,
+  slug: string
+): Promise<Flow> {
+  return apiFetch<Flow>(`/templates/${category}/${slug}/import`, {
+    method: "POST",
+  });
+}
+
+export interface ImportResult {
+  flows: Flow[];
+  errors: { file: string; error: string }[];
+  total_found: number;
+  imported: number;
+}
+
+/** Upload raw YAML text and import it as a new Flow. */
+export async function importYaml(yaml: string): Promise<ImportResult> {
+  return apiFetch<ImportResult>("/templates/import-yaml", {
+    method: "POST",
+    body: JSON.stringify({ yaml }),
+  });
+}
+
+/** Fetch all workflow YAMLs from a GitHub repo and import them. */
+export async function importFromGithub(
+  repoUrl: string,
+  path = "",
+  branch = "main"
+): Promise<ImportResult> {
+  return apiFetch<ImportResult>("/templates/import-github", {
+    method: "POST",
+    body: JSON.stringify({ repo_url: repoUrl, path, branch }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Health / Connection
+// ---------------------------------------------------------------------------
 
 export async function checkConnection(): Promise<boolean> {
   const url = `${getBaseUrl()}/health`;

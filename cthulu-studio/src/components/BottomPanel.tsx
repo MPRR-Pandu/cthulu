@@ -3,11 +3,12 @@ import type { FlowNode, RunEvent } from "../types/flow";
 import Console from "./Console";
 import RunLog from "./RunLog";
 import NodeChat, { type NodeChatState } from "./NodeChat";
+import VmTerminal from "./VmTerminal";
 
 export type BottomTab =
   | { kind: "console" }
   | { kind: "log" }
-  | { kind: "executor"; nodeId: string; label: string };
+  | { kind: "executor"; nodeId: string; label: string; nodeKind: string };
 
 interface BottomPanelProps {
   activeTab: BottomTab | null;
@@ -93,6 +94,7 @@ export default function BottomPanel({
         kind: "executor",
         nodeId: node.id,
         label: node.label || `Executor ${i + 1}`,
+        nodeKind: node.kind,
       });
     });
     return list;
@@ -141,15 +143,11 @@ export default function BottomPanel({
           <RunLog events={runEvents} onClear={onRunEventsClear} onClose={handleClose} />
         )}
         {activeTab.kind === "executor" && flowId && (
-          <NodeChat
-            key={`${flowId}::${activeTab.nodeId}`}
+          <VmTerminal
+            key={`vm:${flowId}::${activeTab.nodeId}`}
             flowId={flowId}
             nodeId={activeTab.nodeId}
             nodeLabel={activeTab.label}
-            initialState={nodeChatStates.get(`${flowId}::${activeTab.nodeId}`) ?? null}
-            onStateChange={(state) =>
-              onNodeChatStateChange(`${flowId}::${activeTab.nodeId}`, state)
-            }
           />
         )}
       </div>

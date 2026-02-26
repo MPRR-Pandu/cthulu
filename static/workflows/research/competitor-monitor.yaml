@@ -1,0 +1,85 @@
+meta:
+  title: "Competitor Monitor"
+  description: "Weekly scrape of competitor websites and news mentions, summarized to Notion"
+  tags: [research, competitor, web-scrape, notion, cron]
+  estimated_cost: "~$0.05 / run"
+  icon: "🔍"
+
+name: competitor-monitor
+description: Weekly competitor intelligence report from web scraping and news monitoring
+enabled: false
+
+trigger:
+  kind: cron
+  config:
+    schedule: "0 8 * * 2"
+    working_dir: "."
+
+sources:
+  - kind: web-scrape
+    label: "Scrape: competitor blog"
+    config:
+      url: "https://competitor.com/blog"
+      keywords:
+        - product
+        - feature
+        - launch
+        - pricing
+
+  - kind: rss
+    label: "RSS: industry news"
+    config:
+      url: "https://techcrunch.com/feed/"
+      limit: 20
+
+filters:
+  - kind: keyword
+    config:
+      keywords:
+        - competitor
+        - rival
+        - alternative
+        - versus
+        - launch
+        - raise
+      require_all: false
+      field: title_or_summary
+
+executors:
+  - kind: claude-code
+    label: "Claude: competitor-intel"
+    config:
+      prompt: |
+        You are a competitive intelligence analyst. Review these web results and news items,
+        then produce a weekly competitor intelligence report.
+
+        Data:
+        {{content}}
+
+        Report structure:
+        ## Competitor Intel — {{timestamp}}
+
+        **New Developments**
+        (Product launches, feature releases, or announcements found this week)
+
+        **Messaging & Positioning**
+        (How are competitors positioning themselves? Any shifts in messaging?)
+
+        **Market Moves**
+        (Partnerships, integrations, fundraising, or expansion signals)
+
+        **Gaps & Opportunities**
+        (Based on what competitors are NOT doing, where might there be opportunity?)
+
+        **Summary**
+        (1-paragraph executive summary of the competitive landscape this week)
+
+        Be analytical and evidence-based. Cite sources where relevant.
+      permissions:
+        - Read
+
+sinks:
+  - kind: notion
+    config:
+      token_env: NOTION_TOKEN
+      database_id: "REPLACE_WITH_YOUR_NOTION_DATABASE_UUID"

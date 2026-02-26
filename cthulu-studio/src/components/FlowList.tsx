@@ -1,10 +1,15 @@
-import type { FlowSummary } from "../types/flow";
+import { useState } from "react";
+import type { FlowSummary, Flow } from "../types/flow";
+import ToggleSwitch from "./ToggleSwitch";
+import TemplateGallery from "./TemplateGallery";
 
 interface FlowListProps {
   flows: FlowSummary[];
   activeFlowId: string | null;
   onSelect: (id: string) => void;
   onCreate: () => void;
+  onImportTemplate: (flow: Flow) => void;
+  onToggleEnabled: (flowId: string) => void;
 }
 
 export default function FlowList({
@@ -12,12 +17,38 @@ export default function FlowList({
   activeFlowId,
   onSelect,
   onCreate,
+  onImportTemplate,
+  onToggleEnabled,
 }: FlowListProps) {
+  const [showGallery, setShowGallery] = useState(false);
+
+  function handleNewClick() {
+    setShowGallery(true);
+  }
+
+  function handleGalleryImport(flow: Flow) {
+    setShowGallery(false);
+    onImportTemplate(flow);
+  }
+
+  function handleBlank() {
+    setShowGallery(false);
+    onCreate();
+  }
+
   return (
+    <>
+      {showGallery && (
+        <TemplateGallery
+          onImport={handleGalleryImport}
+          onBlank={handleBlank}
+          onClose={() => setShowGallery(false)}
+        />
+      )}
     <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, overflow: "hidden" }}>
       <div className="sidebar-header" style={{ flexShrink: 0 }}>
         <h2>Flows</h2>
-        <button className="ghost" onClick={onCreate}>
+        <button className="ghost" onClick={handleNewClick}>
           + New
         </button>
       </div>
@@ -25,19 +56,20 @@ export default function FlowList({
         {flows.map((flow) => (
           <div
             key={flow.id}
-            className={`flow-item ${flow.id === activeFlowId ? "active" : ""}${!(flow.enabled) ? " flow-item-disabled" : ""}`}
+            className={`flow-item ${flow.id === activeFlowId ? "active" : ""}${!flow.enabled ? " flow-item-disabled" : ""}`}
             onClick={() => onSelect(flow.id)}
           >
-            <div className="flow-item-name">
-              <span
-                className={`flow-status-dot ${flow.enabled ? "enabled" : "disabled"}`}
-                title={flow.enabled ? "Enabled" : "Disabled"}
+            <div className="flow-item-row">
+              <div className="flow-item-name">
+                {flow.name}
+              </div>
+              <ToggleSwitch
+                checked={flow.enabled}
+                onChange={() => onToggleEnabled(flow.id)}
               />
-              {flow.name}
             </div>
             <div className="flow-item-meta">
-              {flow.node_count} nodes &middot;{" "}
-              {flow.enabled ? "Enabled" : "Disabled"}
+              {flow.node_count} nodes
             </div>
           </div>
         ))}
@@ -48,5 +80,6 @@ export default function FlowList({
         )}
       </div>
     </div>
+    </>
   );
 }

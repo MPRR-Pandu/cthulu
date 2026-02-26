@@ -1,0 +1,69 @@
+meta:
+  title: "LinkedIn Content Ideas"
+  description: "Generate weekly LinkedIn post ideas from trending industry news"
+  tags: [social, linkedin, content, rss, cron]
+  estimated_cost: "~$0.04 / run"
+  icon: "💼"
+
+name: linkedin-content-ideas
+description: Generate weekly LinkedIn post ideas from trending industry news
+enabled: false
+
+trigger:
+  kind: cron
+  config:
+    schedule: "0 7 * * 1"
+    working_dir: "."
+
+sources:
+  - kind: rss
+    label: "RSS: industry news"
+    config:
+      url: "https://thedefiant.io/feed"
+      limit: 15
+
+  - kind: rss
+    label: "RSS: tech news"
+    config:
+      url: "https://techcrunch.com/feed/"
+      limit: 15
+
+filters:
+  - kind: keyword
+    config:
+      keywords:
+        - innovation
+        - trend
+        - future
+        - launch
+        - growth
+        - research
+      require_all: false
+      field: title_or_summary
+
+executors:
+  - kind: claude-code
+    label: "Claude: linkedin-ideas"
+    config:
+      prompt: |
+        You are a LinkedIn content strategist. Based on these trending news items,
+        generate 5 LinkedIn post ideas for a thought leader in the space.
+
+        News items:
+        {{content}}
+
+        For each idea provide:
+        1. **Hook** (the opening line that grabs attention)
+        2. **Angle** (the unique perspective or insight to share)
+        3. **Key point** (the main takeaway in 1 sentence)
+        4. **CTA** (a question or call-to-action to drive engagement)
+
+        Format as a numbered list. Make each post feel authentic and conversational,
+        not promotional. Avoid buzzwords. Today: {{timestamp}}.
+      permissions:
+        - Read
+
+sinks:
+  - kind: slack
+    config:
+      webhook_url_env: SLACK_WEBHOOK_URL

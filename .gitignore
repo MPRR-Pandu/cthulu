@@ -1,6 +1,7 @@
 /target
 .env
 *.p8
+.DS_Store
 .DS_STORE
 .personal/
 
@@ -8,6 +9,6 @@
 sessions.yaml
 sessions.yaml.tmp
 
-# Nx
+# Nx / Node
 .nx/
 node_modules/

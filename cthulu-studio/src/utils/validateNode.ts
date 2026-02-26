@@ -5,6 +5,11 @@ function isValidCron(expr: string): boolean {
   return tokens.length >= 5 && tokens.length <= 6;
 }
 
+const UUID_RE = /^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$/i;
+function isValidUuid(s: string): boolean {
+  return UUID_RE.test(s.trim());
+}
+
 export function validateNode(node: FlowNode): string[] {
   const errors: string[] = [];
   const cfg = node.config;
@@ -55,6 +60,9 @@ export function validateNode(node: FlowNode): string[] {
         errors.push("Prompt is required");
       }
       break;
+    case "vm-sandbox":
+      // No required fields — tier has a default, api_key is optional
+      break;
     case "slack":
       if (
         (!cfg.webhook_url_env || !(cfg.webhook_url_env as string).trim()) &&
@@ -69,6 +77,8 @@ export function validateNode(node: FlowNode): string[] {
       }
       if (!cfg.database_id || !(cfg.database_id as string).trim()) {
         errors.push("Database ID is required");
+      } else if (!isValidUuid(cfg.database_id as string)) {
+        errors.push("Database ID must be a valid UUID (e.g. 30aac5ee-1a2b-3c4d-5e6f-1234567890ab)");
       }
       break;
   }

@@ -117,3 +117,29 @@ export interface SavedPrompt {
   tags: string[];
   created_at: string;
 }
+
+// ---------------------------------------------------------------------------
+// Template Gallery
+// ---------------------------------------------------------------------------
+
+/** Minimal pipeline shape — used to render the mini flow diagram on each card. */
+export interface PipelineShape {
+  trigger: string;
+  sources: string[];
+  filters: string[];
+  executors: string[];
+  sinks: string[];
+}
+
+/** Metadata for a single workflow template loaded from static/workflows/. */
+export interface TemplateMetadata {
+  slug: string;
+  category: string;
+  title: string;
+  description: string;
+  tags: string[];
+  estimated_cost: string | null;
+  icon: string | null;
+  pipeline_shape: PipelineShape;
+  raw_yaml: string;
+}

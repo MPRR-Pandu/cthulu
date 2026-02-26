@@ -1,0 +1,71 @@
+meta:
+  title: "Weekly Newsletter Draft"
+  description: "Auto-draft a weekly newsletter from curated RSS sources, saved to Notion"
+  tags: [newsletter, rss, notion, cron]
+  estimated_cost: "~$0.06 / run"
+  icon: "✉️"
+
+name: weekly-newsletter
+description: Auto-draft a weekly newsletter from curated RSS sources, saved to Notion
+enabled: false
+
+trigger:
+  kind: cron
+  config:
+    schedule: "0 8 * * 1"
+    working_dir: "."
+
+sources:
+  - kind: rss
+    label: "RSS: thedefiant.io"
+    config:
+      url: "https://thedefiant.io/feed"
+      limit: 20
+
+  - kind: rss
+    label: "RSS: blockworks.co"
+    config:
+      url: "https://blockworks.co/feed"
+      limit: 20
+
+  - kind: rss
+    label: "RSS: unchainedcrypto.com"
+    config:
+      url: "https://unchainedcrypto.com/feed/"
+      limit: 20
+
+executors:
+  - kind: claude-code
+    label: "Claude: newsletter-draft"
+    config:
+      prompt: |
+        You are a newsletter writer. Based on {{item_count}} news items from this week,
+        draft a polished weekly newsletter.
+
+        Items:
+        {{content}}
+
+        Format:
+        # Weekly Brief — {{timestamp}}
+
+        ## This Week in Brief
+        (2-3 sentence executive summary)
+
+        ## Top Stories
+        (3-5 stories with headline, 2-sentence summary, and why it matters)
+
+        ## Trending Themes
+        (2-3 recurring themes across the week's news)
+
+        ## Quick Hits
+        (5 bullet points of shorter items worth noting)
+
+        Write in a professional but approachable tone. Total length: 600-800 words.
+      permissions:
+        - Read
+
+sinks:
+  - kind: notion
+    config:
+      token_env: NOTION_TOKEN
+      database_id: "REPLACE_WITH_YOUR_NOTION_DATABASE_UUID"

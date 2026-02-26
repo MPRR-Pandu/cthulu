@@ -1,7 +1,9 @@
+pub mod auth_routes;
 pub mod flow_routes;
 pub mod middleware;
 pub mod prompt_routes;
 pub mod routes;
+pub mod template_routes;
 
 use axum::Router;
 use serde::{Deserialize, Serialize};
@@ -14,6 +16,8 @@ use crate::flows::events::RunEvent;
 use crate::flows::scheduler::FlowScheduler;
 use crate::flows::store::Store;
 use crate::github::client::GithubClient;
+use crate::sandbox::backends::vm_manager::VmManagerProvider;
+use crate::sandbox::provider::SandboxProvider;
 
 /// Build a composite key for node-scoped sessions: `"flow_id::node_id"`.
 pub fn node_sessions_key(flow_id: &str, node_id: &str) -> String {
@@ -83,10 +87,22 @@ impl FlowSessions {
     }
 }
 
+/// Minimal VM-to-node mapping persisted in `sessions.yaml`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VmMapping {
+    pub vm_id: u32,
+    pub vm_name: String,         // e.g. "Executor-E01_a3f2b1"
+    #[serde(default)]
+    pub web_terminal_url: String, // e.g. "http://34.100.130.60:7700"
+}
+
 /// Root structure for `sessions.yaml`.
 #[derive(Debug, Serialize, Deserialize)]
 struct SessionsFile {
     sessions: HashMap<String, FlowSessions>,
+    /// VM mappings keyed by "flow_id::node_id".
+    #[serde(default)]
+    vms: HashMap<String, VmMapping>,
 }
 
 /// Old format (pre-migration): single session per flow.
@@ -106,24 +122,40 @@ struct LegacyInteractSession {
     total_cost: f64,
 }
 
+/// Loaded data from `sessions.yaml` — sessions + VM mappings.
+pub struct LoadedSessions {
+    pub sessions: HashMap<String, FlowSessions>,
+    pub vms: HashMap<String, VmMapping>,
+}
+
 /// Load persisted sessions from a YAML file.
 /// Supports auto-migration from the old single-session-per-flow format.
-/// Returns an empty map if the file doesn't exist or can't be parsed.
-pub fn load_sessions(path: &Path) -> HashMap<String, FlowSessions> {
+/// Returns empty maps if the file doesn't exist or can't be parsed.
+pub fn load_sessions(path: &Path) -> LoadedSessions {
     let contents = match std::fs::read_to_string(path) {
         Ok(c) => c,
         Err(e) => {
             if e.kind() != std::io::ErrorKind::NotFound {
                 tracing::warn!(path = %path.display(), error = %e, "failed to read sessions file");
             }
-            return HashMap::new();
+            return LoadedSessions {
+                sessions: HashMap::new(),
+                vms: HashMap::new(),
+            };
         }
     };
 
     // Try new format first
     if let Ok(file) = serde_yaml::from_str::<SessionsFile>(&contents) {
-        tracing::info!(count = file.sessions.len(), "loaded persisted sessions");
-        return file.sessions;
+        tracing::info!(
+            sessions = file.sessions.len(),
+            vms = file.vms.len(),
+            "loaded persisted sessions"
+        );
+        return LoadedSessions {
+            sessions: file.sessions,
+            vms: file.vms,
+        };
     }
 
     // Try legacy format (single session per flow) and auto-migrate
@@ -161,15 +193,25 @@ pub fn load_sessions(path: &Path) -> HashMap<String, FlowSessions> {
                 (flow_id, flow_sessions)
             })
             .collect();
-        return migrated;
+        return LoadedSessions {
+            sessions: migrated,
+            vms: HashMap::new(),
+        };
     }
 
     tracing::warn!(path = %path.display(), "failed to parse sessions file in any known format");
-    HashMap::new()
+    LoadedSessions {
+        sessions: HashMap::new(),
+        vms: HashMap::new(),
+    }
 }
 
 /// Persist sessions to a YAML file (atomic write via temp + rename).
-pub fn save_sessions(path: &Path, sessions: &HashMap<String, FlowSessions>) {
+pub fn save_sessions(
+    path: &Path,
+    sessions: &HashMap<String, FlowSessions>,
+    vms: &HashMap<String, VmMapping>,
+) {
     let file = SessionsFile {
         sessions: sessions
             .iter()
@@ -200,6 +242,7 @@ pub fn save_sessions(path: &Path, sessions: &HashMap<String, FlowSessions>) {
                 )
             })
             .collect(),
+        vms: vms.clone(),
     };
 
     let yaml = match serde_yaml::to_string(&file) {
@@ -248,8 +291,31 @@ pub struct AppState {
     pub sessions_path: PathBuf,
     /// Base data directory (~/.cthulu) for attachments etc.
     pub data_dir: PathBuf,
+    /// Path to the `static/` directory (template YAML files live in `static/workflows/`).
+    pub static_dir: PathBuf,
     /// Persistent Claude CLI processes keyed by session key (flow_id::node_id).
     pub live_processes: Arc<Mutex<HashMap<String, LiveClaudeProcess>>>,
+    /// Sandbox provider for isolated executor runs.
+    pub sandbox_provider: Arc<dyn SandboxProvider>,
+    /// VM Manager provider (only set when using VmManager backend).
+    /// Stored separately because the VM endpoints need VmManagerProvider-specific methods.
+    pub vm_manager: Option<Arc<VmManagerProvider>>,
+    /// VM-to-node mappings persisted in sessions.yaml. Key: "flow_id::node_id".
+    pub vm_mappings: Arc<RwLock<HashMap<String, VmMapping>>>,
+    /// Claude OAuth access token (read from macOS Keychain or CLAUDE_CODE_OAUTH_TOKEN env).
+    /// Wrapped in Arc<RwLock> so it can be refreshed at runtime without a restart.
+    pub oauth_token: Arc<RwLock<Option<String>>>,
+}
+
+impl AppState {
+    /// Save sessions + VM mappings to sessions.yaml.
+    /// Reads vm_mappings synchronously (no await) via try_read to avoid async in some call sites.
+    pub fn save_sessions_with_vms(&self, sessions: &HashMap<String, FlowSessions>) {
+        let vms = self.vm_mappings.try_read()
+            .map(|guard| guard.clone())
+            .unwrap_or_default();
+        save_sessions(&self.sessions_path, sessions, &vms);
+    }
 }
 
 pub fn create_app(state: AppState) -> Router {

@@ -9,9 +9,6 @@
 sessions.yaml
 sessions.yaml.tmp
 
-# Runtime-generated agent context (injected per executor node, not source code)
-.skills/
-
 # Nx / Node
 .nx/
 node_modules/

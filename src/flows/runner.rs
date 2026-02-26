@@ -835,6 +835,18 @@ fn parse_source_configs(
                     date_format, limit,
                 }
             }
+            "google-sheets" => {
+                let spreadsheet_id = node.config["spreadsheet_id"]
+                    .as_str()
+                    .context("google-sheets node missing 'spreadsheet_id'")?
+                    .to_string();
+                let range = node.config["range"].as_str().map(String::from);
+                let service_account_key_env = node.config["service_account_key_env"].as_str().map(String::from);
+                let limit = node.config["limit"].as_u64().map(|n| n as usize);
+                SourceConfig::GoogleSheets {
+                    spreadsheet_id, range, service_account_key_env, limit,
+                }
+            }
             "market-data" => {
                 // Market data is handled specially via template variable
                 continue;

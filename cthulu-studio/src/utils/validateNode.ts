@@ -40,6 +40,11 @@ export function validateNode(node: FlowNode): string[] {
         errors.push("Items selector is required");
       }
       break;
+    case "google-sheets":
+      if (!cfg.spreadsheet_id || !(cfg.spreadsheet_id as string).trim()) {
+        errors.push("Spreadsheet ID is required");
+      }
+      break;
     case "github-merged-prs":
       if (!Array.isArray(cfg.repos) || cfg.repos.length === 0) {
         errors.push("Repos is required");

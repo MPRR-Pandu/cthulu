@@ -2,17 +2,15 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   AssistantRuntimeProvider,
   useExternalStoreRuntime,
+  ThreadPrimitive,
+  MessagePrimitive,
   type ThreadMessageLike,
 } from "@assistant-ui/react";
-import { Thread, makeMarkdownText } from "@assistant-ui/react-ui";
+import { MarkdownTextPrimitive } from "@assistant-ui/react-markdown";
+import "@assistant-ui/react-ui/styles/markdown.css";
+import type { ToolCallMessagePartProps } from "@assistant-ui/react";
 import { getSessionLog, streamSessionLog } from "../api/client";
 import type { FlowRunMeta } from "../api/client";
-
-import "@assistant-ui/react-ui/styles/index.css";
-import "@assistant-ui/react-ui/styles/markdown.css";
-import "@assistant-ui/react-ui/styles/themes/default.css";
-
-const MarkdownText = makeMarkdownText();
 
 interface FlowRunChatViewProps {
   agentId: string;
@@ -61,9 +59,7 @@ function linesToMessages(lines: RawLine[]): ThreadMessageLike[] {
     if (!parsed) continue;
     const eventType = parsed.type as string;
 
-    if (eventType === "system") {
-      continue;
-    }
+    if (eventType === "system") continue;
 
     if (eventType === "assistant") {
       const content = (parsed.message as Record<string, unknown>)
@@ -104,14 +100,12 @@ function linesToMessages(lines: RawLine[]): ThreadMessageLike[] {
           });
         }
       }
-
       flushAssistant();
       continue;
     }
 
     if (eventType === "result") {
       flushAssistant();
-
       const resultText = (parsed.result as string) || "";
       if (resultText) {
         messages.push({
@@ -144,7 +138,70 @@ function linesToMessages(lines: RawLine[]): ThreadMessageLike[] {
   return messages;
 }
 
-// ── Main FlowRunChatView ────────────────────────────────────────────
+// ── Compact content components ──────────────────────────────────────
+
+function CompactAssistantMessage() {
+  return (
+    <MessagePrimitive.Root className="fr-msg">
+      <MessagePrimitive.Content
+        components={{
+          Text: CompactMarkdown,
+          tools: { Fallback: CompactToolCall },
+        }}
+      />
+    </MessagePrimitive.Root>
+  );
+}
+
+function CompactUserMessage() {
+  return (
+    <MessagePrimitive.Root className="fr-msg fr-msg-user">
+      <MessagePrimitive.Content
+        components={{ Text: CompactMarkdown }}
+      />
+    </MessagePrimitive.Root>
+  );
+}
+
+function CompactMarkdown() {
+  return (
+    <div className="fr-md">
+      <MarkdownTextPrimitive />
+    </div>
+  );
+}
+
+function CompactToolCall(props: ToolCallMessagePartProps) {
+  const [open, setOpen] = useState(false);
+  const hasResult = props.result !== undefined;
+
+  return (
+    <div className="fr-tool">
+      <div className="fr-tool-row" onClick={() => setOpen((v) => !v)}>
+        <span className="fr-tool-caret">{open ? "▾" : "▸"}</span>
+        <span className="fr-tool-name">{props.toolName}</span>
+        {hasResult && <span className="fr-tool-done">✓</span>}
+      </div>
+      {open && (
+        <div className="fr-tool-detail">
+          <pre>{JSON.stringify(props.args, null, 2)}</pre>
+          {hasResult && (
+            <>
+              <div className="fr-tool-sep" />
+              <pre className="fr-tool-result">
+                {typeof props.result === "string"
+                  ? props.result
+                  : JSON.stringify(props.result, null, 2)}
+              </pre>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Main component ──────────────────────────────────────────────────
 
 function FlowRunThread({
   messages,
@@ -161,43 +218,38 @@ function FlowRunThread({
     isRunning,
     messages,
     convertMessage: (msg) => msg,
-    onNew: async () => {
-      // Read-only — no-op
-    },
+    onNew: async () => {},
   });
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <div className="flow-run-chat dark">
+      <div className="fr-wrap">
         {flowRun && (
-          <div className="flow-run-header">
-            <span className="flow-run-header-label">
+          <div className="fr-bar">
+            <span className="fr-bar-label">
               {flowRun.flow_name} &mdash; {flowRun.node_label}
             </span>
-            <span className="flow-run-header-run">
-              Run: {flowRun.run_id.slice(0, 8)}
+            <span className="fr-bar-meta">
+              {isRunning ? (
+                <span className="fr-bar-live">● live</span>
+              ) : resultMeta ? (
+                <>{resultMeta.turns}t · ${resultMeta.cost.toFixed(4)}</>
+              ) : null}
+              <span className="fr-bar-id">{flowRun.run_id.slice(0, 8)}</span>
             </span>
           </div>
         )}
 
-        <Thread
-          assistantMessage={{ components: { Text: MarkdownText } }}
-        />
-
-        {isRunning && (
-          <div className="flow-run-busy">
-            <span className="flow-run-busy-dot" />
-            Running...
-          </div>
-        )}
-
-        {!isRunning && resultMeta && (
-          <div className="flow-run-result">
-            <span className="flow-run-result-badge">
-              {resultMeta.turns} turns &middot; ${resultMeta.cost.toFixed(4)}
-            </span>
-          </div>
-        )}
+        <ThreadPrimitive.Root className="fr-thread">
+          <ThreadPrimitive.Viewport className="fr-viewport">
+            <ThreadPrimitive.Messages
+              components={{
+                UserMessage: CompactUserMessage,
+                AssistantMessage: CompactAssistantMessage,
+              }}
+            />
+          </ThreadPrimitive.Viewport>
+        </ThreadPrimitive.Root>
       </div>
     </AssistantRuntimeProvider>
   );
@@ -222,11 +274,8 @@ export default function FlowRunChatView({
     setIsLive(busy);
 
     if (busy) {
-      const cleanup = streamSessionLog(
-        agentId,
-        sessionId,
-        addLine,
-        () => setIsLive(false)
+      const cleanup = streamSessionLog(agentId, sessionId, addLine, () =>
+        setIsLive(false)
       );
       return cleanup;
     } else {

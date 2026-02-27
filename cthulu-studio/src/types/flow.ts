@@ -1,4 +1,6 @@
-export type NodeType = "trigger" | "source" | "filter" | "executor" | "sink";
+export const STUDIO_ASSISTANT_ID = "studio-assistant";
+
+export type NodeType = "trigger" | "source" | "executor" | "sink";
 
 export interface Position {
   x: number;
@@ -27,6 +29,7 @@ export interface Flow {
   enabled: boolean;
   nodes: FlowNode[];
   edges: FlowEdge[];
+  version: number;
   created_at: string;
   updated_at: string;
 }
@@ -151,7 +154,6 @@ export interface AgentSummary {
 export interface PipelineShape {
   trigger: string;
   sources: string[];
-  filters: string[];
   executors: string[];
   sinks: string[];
 }

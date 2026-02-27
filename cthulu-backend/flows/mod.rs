@@ -1,6 +1,8 @@
 pub mod events;
 pub mod file_repository;
+pub mod graph;
 pub mod history;
+pub mod processors;
 pub mod repository;
 pub mod runner;
 pub mod scheduler;
@@ -18,6 +20,8 @@ pub struct Flow {
     pub enabled: bool,
     pub nodes: Vec<Node>,
     pub edges: Vec<Edge>,
+    #[serde(default)]
+    pub version: u64,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -41,7 +45,6 @@ pub struct Node {
 pub enum NodeType {
     Trigger,
     Source,
-    Filter,
     Executor,
     Sink,
 }
@@ -79,6 +82,7 @@ mod tests {
                 label: "Every 4 hours".to_string(),
             }],
             edges: vec![],
+            version: 0,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
@@ -99,10 +103,6 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&NodeType::Source).unwrap(),
             "\"source\""
-        );
-        assert_eq!(
-            serde_json::to_string(&NodeType::Filter).unwrap(),
-            "\"filter\""
         );
         assert_eq!(
             serde_json::to_string(&NodeType::Executor).unwrap(),

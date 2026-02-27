@@ -10,6 +10,7 @@ use std::convert::Infallible;
 use uuid::Uuid;
 
 use crate::api::AppState;
+use crate::api::changes::{ChangeType, ResourceChangeEvent, ResourceType};
 use crate::flows::{Edge, Flow, Node};
 
 pub(crate) async fn list_flows(State(state): State<AppState>) -> Json<Value> {
@@ -71,6 +72,7 @@ pub(crate) async fn create_flow(
         enabled: true,
         nodes: body.nodes,
         edges: body.edges,
+        version: 0,
         created_at: now,
         updated_at: now,
     };
@@ -88,6 +90,13 @@ pub(crate) async fn create_flow(
         tracing::warn!(flow_id = %id, error = %e, "Failed to start trigger for new flow");
     }
 
+    let _ = state.changes_tx.send(ResourceChangeEvent {
+        resource_type: ResourceType::Flow,
+        change_type: ChangeType::Created,
+        resource_id: id.clone(),
+        timestamp: chrono::Utc::now(),
+    });
+
     (StatusCode::CREATED, Json(json!({ "id": id })))
 }
 
@@ -103,6 +112,8 @@ pub(crate) struct UpdateFlowRequest {
     nodes: Option<Vec<Node>>,
     #[serde(default)]
     edges: Option<Vec<Edge>>,
+    #[serde(default)]
+    version: Option<u64>,
 }
 
 pub(crate) async fn update_flow(
@@ -116,6 +127,19 @@ pub(crate) async fn update_flow(
             Json(json!({ "error": "flow not found" })),
         )
     })?;
+
+    // Optimistic concurrency: reject stale writes
+    if let Some(client_version) = body.version {
+        if client_version < flow.version {
+            return Err((
+                StatusCode::CONFLICT,
+                Json(json!({
+                    "error": "conflict",
+                    "server_version": flow.version
+                })),
+            ));
+        }
+    }
 
     if let Some(name) = body.name {
         flow.name = name;
@@ -132,6 +156,7 @@ pub(crate) async fn update_flow(
     if let Some(edges) = body.edges {
         flow.edges = edges;
     }
+    flow.version += 1;
     flow.updated_at = Utc::now();
 
     state.flow_repo.save_flow(flow.clone()).await.map_err(|e| {
@@ -145,6 +170,13 @@ pub(crate) async fn update_flow(
     if let Err(e) = state.scheduler.restart_flow(&id).await {
         tracing::warn!(flow_id = %id, error = %e, "Failed to restart trigger for updated flow");
     }
+
+    let _ = state.changes_tx.send(ResourceChangeEvent {
+        resource_type: ResourceType::Flow,
+        change_type: ChangeType::Updated,
+        resource_id: id.clone(),
+        timestamp: chrono::Utc::now(),
+    });
 
     // VM lifecycle: provision on enable, destroy on disable
     if body.enabled.is_some() {
@@ -230,6 +262,13 @@ pub(crate) async fn delete_flow(
             Json(json!({ "error": "flow not found" })),
         ));
     }
+
+    let _ = state.changes_tx.send(ResourceChangeEvent {
+        resource_type: ResourceType::Flow,
+        change_type: ChangeType::Deleted,
+        resource_id: id,
+        timestamp: chrono::Utc::now(),
+    });
 
     Ok(Json(json!({ "deleted": true })))
 }
@@ -438,16 +477,6 @@ pub(crate) async fn get_node_types() -> Json<Value> {
                 "node_type": "source",
                 "label": "Market Data",
                 "config_schema": {}
-            },
-            {
-                "kind": "keyword",
-                "node_type": "filter",
-                "label": "Keyword Filter",
-                "config_schema": {
-                    "keywords": { "type": "array", "description": "Keywords to match (case-insensitive)", "required": true },
-                    "require_all": { "type": "boolean", "description": "Require all keywords to match", "default": false },
-                    "field": { "type": "string", "description": "Field to match: title, summary, or title_or_summary", "default": "title_or_summary" }
-                }
             },
             {
                 "kind": "claude-code",

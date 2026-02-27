@@ -1,71 +1,179 @@
 {
-  "_comment": "This file is auto-generated at runtime. The content below is a minimal blank template showing the schema. The Cthulu backend replaces it with the live flow definition when a user opens an executor node.",
-  "id": "00000000-0000-0000-0000-000000000000",
-  "name": "example-flow",
-  "description": "A minimal example flow showing the schema. Replace with real content at runtime.",
-  "enabled": true,
+  "id": "5a7fd2e7-76a1-44b7-b7f1-af5e1580fa83",
+  "name": "orangerock-market-brief",
+  "description": "Imported from cthulu.toml task 'orangerock-market-brief'",
+  "enabled": false,
   "nodes": [
     {
-      "id": "00000000-0000-0000-0000-000000000001",
+      "id": "90086604-4c66-4b80-9018-9fa399f9310d",
       "node_type": "trigger",
       "kind": "cron",
       "config": {
-        "schedule": "0 9 * * 1-5",
-        "working_dir": "."
+        "schedule": "0 */4 * * *",
+        "working_dir": "/Users/andreiterentiev/Developer/cthulu"
       },
-      "position": { "x": 100.0, "y": 300.0 },
-      "label": "Weekdays at 9am"
+      "position": {
+        "x": 0.0,
+        "y": 0.0
+      },
+      "label": "Every 4h"
     },
     {
-      "id": "00000000-0000-0000-0000-000000000002",
+      "id": "88d8f23f-3b4d-4dc8-b584-27e1da6a14d4",
       "node_type": "source",
       "kind": "rss",
       "config": {
-        "url": "https://example.com/feed",
-        "limit": 10
+        "limit": 10,
+        "url": "https://thedefiant.io/feed"
       },
-      "position": { "x": 350.0, "y": 200.0 },
-      "label": "RSS: example.com"
+      "position": {
+        "x": 280.0,
+        "y": -240.0
+      },
+      "label": "RSS: thedefiant.io"
     },
     {
-      "id": "00000000-0000-0000-0000-000000000003",
+      "id": "2f4befef-1bf7-4b4e-ab06-4a20dfe57f43",
+      "node_type": "source",
+      "kind": "rss",
+      "config": {
+        "limit": 10,
+        "url": "https://blockworks.co/feed"
+      },
+      "position": {
+        "x": 280.0,
+        "y": -120.0
+      },
+      "label": "RSS: blockworks.co"
+    },
+    {
+      "id": "6826f9e8-b780-43c2-9e91-1933c122e981",
+      "node_type": "source",
+      "kind": "rss",
+      "config": {
+        "limit": 10,
+        "url": "https://www.dlnews.com/arc/outboundfeeds/rss/"
+      },
+      "position": {
+        "x": 280.0,
+        "y": 0.0
+      },
+      "label": "RSS: www.dlnews.com"
+    },
+    {
+      "id": "0ef23934-9843-4107-867e-6dec8afad82d",
+      "node_type": "source",
+      "kind": "rss",
+      "config": {
+        "limit": 10,
+        "url": "https://www.theblock.co/rss.xml"
+      },
+      "position": {
+        "x": 280.0,
+        "y": 120.0
+      },
+      "label": "RSS: www.theblock.co"
+    },
+    {
+      "id": "e5bcfef2-f39f-4a00-9558-2ee877f1ea8c",
+      "node_type": "source",
+      "kind": "rss",
+      "config": {
+        "limit": 10,
+        "url": "https://unchainedcrypto.com/feed/"
+      },
+      "position": {
+        "x": 280.0,
+        "y": 240.0
+      },
+      "label": "RSS: unchainedcrypto.com"
+    },
+    {
+      "id": "cc3edce8-d26e-4c56-a1fa-9a6e494901a0",
       "node_type": "executor",
       "kind": "claude-code",
       "config": {
-        "permissions": ["Bash", "Read", "Grep", "Glob"],
-        "prompt": "prompts/my_prompt.md"
+        "permissions": [],
+        "prompt": "prompts/orangerock_brief.md"
       },
-      "position": { "x": 600.0, "y": 300.0 },
-      "label": "Claude: my_prompt.md"
+      "position": {
+        "x": 560.0,
+        "y": 0.0
+      },
+      "label": "Claude: prompts/orangerock_brief.md"
     },
     {
-      "id": "00000000-0000-0000-0000-000000000004",
+      "id": "66b32844-2d7c-43d1-bed6-9af9b26d84aa",
       "node_type": "sink",
-      "kind": "slack",
+      "kind": "notion",
       "config": {
-        "webhook_url_env": "SLACK_WEBHOOK_URL"
+        "database_id": "30aac5ee2bf980728eaefe59a03ea940",
+        "token_env": "NOTION_TOKEN"
       },
-      "position": { "x": 850.0, "y": 300.0 },
-      "label": "Slack: #general"
+      "position": {
+        "x": 840.0,
+        "y": 0.0
+      },
+      "label": "Notion: 30aac5ee..."
     }
   ],
   "edges": [
     {
-      "id": "e1",
-      "source": "00000000-0000-0000-0000-000000000001",
-      "target": "00000000-0000-0000-0000-000000000002"
+      "id": "aa5f91e9-3286-4a42-be99-fe039e207936",
+      "source": "90086604-4c66-4b80-9018-9fa399f9310d",
+      "target": "88d8f23f-3b4d-4dc8-b584-27e1da6a14d4"
     },
     {
-      "id": "e2",
-      "source": "00000000-0000-0000-0000-000000000002",
-      "target": "00000000-0000-0000-0000-000000000003"
+      "id": "fae4a2d0-8828-4086-9940-73a1ac757caf",
+      "source": "90086604-4c66-4b80-9018-9fa399f9310d",
+      "target": "2f4befef-1bf7-4b4e-ab06-4a20dfe57f43"
     },
     {
-      "id": "e3",
-      "source": "00000000-0000-0000-0000-000000000003",
-      "target": "00000000-0000-0000-0000-000000000004"
+      "id": "f5eb91ab-254d-4656-924f-25b20ace99f8",
+      "source": "90086604-4c66-4b80-9018-9fa399f9310d",
+      "target": "6826f9e8-b780-43c2-9e91-1933c122e981"
+    },
+    {
+      "id": "262fe521-d812-4533-bb36-3b499642fb75",
+      "source": "90086604-4c66-4b80-9018-9fa399f9310d",
+      "target": "0ef23934-9843-4107-867e-6dec8afad82d"
+    },
+    {
+      "id": "1fc17855-5058-47e7-9ae2-48a0774c3dfe",
+      "source": "90086604-4c66-4b80-9018-9fa399f9310d",
+      "target": "e5bcfef2-f39f-4a00-9558-2ee877f1ea8c"
+    },
+    {
+      "id": "660db107-7c19-4198-a509-71ec8188631c",
+      "source": "88d8f23f-3b4d-4dc8-b584-27e1da6a14d4",
+      "target": "cc3edce8-d26e-4c56-a1fa-9a6e494901a0"
+    },
+    {
+      "id": "f5499861-feaf-4f02-aed5-eb1560954f4e",
+      "source": "2f4befef-1bf7-4b4e-ab06-4a20dfe57f43",
+      "target": "cc3edce8-d26e-4c56-a1fa-9a6e494901a0"
+    },
+    {
+      "id": "5d973a45-d39b-4c5d-a794-4de5a7cc01d6",
+      "source": "6826f9e8-b780-43c2-9e91-1933c122e981",
+      "target": "cc3edce8-d26e-4c56-a1fa-9a6e494901a0"
+    },
+    {
+      "id": "77d04cc5-5d8c-4a5e-9325-3bd0464dce43",
+      "source": "0ef23934-9843-4107-867e-6dec8afad82d",
+      "target": "cc3edce8-d26e-4c56-a1fa-9a6e494901a0"
+    },
+    {
+      "id": "ff2796c6-2497-4aef-a553-07276e183165",
+      "source": "e5bcfef2-f39f-4a00-9558-2ee877f1ea8c",
+      "target": "cc3edce8-d26e-4c56-a1fa-9a6e494901a0"
+    },
+    {
+      "id": "e292fcee-9e07-41c3-9957-98c4b41f55e1",
+      "source": "cc3edce8-d26e-4c56-a1fa-9a6e494901a0",
+      "target": "66b32844-2d7c-43d1-bed6-9af9b26d84aa"
     }
   ],
-  "created_at": "2026-01-01T00:00:00.000Z",
-  "updated_at": "2026-01-01T00:00:00.000Z"
+  "created_at": "2026-02-18T15:12:23.495404Z",
+  "updated_at": "2026-02-26T15:17:31.617378Z"
 }

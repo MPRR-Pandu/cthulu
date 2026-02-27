@@ -19,15 +19,14 @@ import "@xyflow/react/dist/style.css";
 import TriggerNode from "./NodeTypes/TriggerNode";
 import SourceNode from "./NodeTypes/SourceNode";
 import ExecutorNode from "./NodeTypes/ExecutorNode";
-import FilterNode from "./NodeTypes/FilterNode";
 import SinkNode from "./NodeTypes/SinkNode";
 import type { Flow, FlowNode, FlowEdge } from "../types/flow";
+import type { UpdateSignal } from "../hooks/useFlowDispatch";
 import { log } from "../api/logger";
 
 const rfNodeTypes: NodeTypes = {
   trigger: TriggerNode,
   source: SourceNode,
-  filter: FilterNode,
   executor: ExecutorNode,
   sink: SinkNode,
 };
@@ -95,19 +94,22 @@ export interface CanvasHandle {
   getNode: (id: string) => FlowNode | null;
   updateNodeData: (id: string, updates: { label?: string; config?: Record<string, unknown> }) => void;
   deleteNode: (id: string) => void;
+  /** Spread-merge nodes/edges from an external source (e.g. JSON editor). */
+  mergeFromFlow: (nodes: FlowNode[], edges: FlowEdge[]) => void;
 }
 
 interface CanvasProps {
   flowId: string | null;
-  initialFlow: Flow | null;
-  onFlowSnapshot: (snapshot: { nodes: FlowNode[]; edges: FlowEdge[] }) => void;
+  canonicalFlow: Flow | null;
+  updateSignal: UpdateSignal;
+  onFlowChange: (updates: { nodes: FlowNode[]; edges: FlowEdge[] }) => void;
   onSelectionChange: (nodeId: string | null) => void;
   nodeRunStatus?: Record<string, "running" | "completed" | "failed">;
   nodeValidationErrors?: Record<string, string[]>;
 }
 
 const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
-  { flowId, initialFlow, onFlowSnapshot, onSelectionChange, nodeRunStatus, nodeValidationErrors },
+  { flowId, canonicalFlow, updateSignal, onFlowChange, onSelectionChange, nodeRunStatus, nodeValidationErrors },
   ref
 ) {
   const [nodes, setNodes, onNodesChange] = useNodesState<RFNode>([]);
@@ -116,19 +118,79 @@ const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
   const prevFlowId = useRef<string | null>(null);
   const nodesRef = useRef<RFNode[]>(nodes);
   nodesRef.current = nodes;
+  const edgesRef = useRef<RFEdge[]>(edges);
+  edgesRef.current = edges;
+
+  const lastAppliedCounter = useRef(0);
+
+  // --- Notify parent of changes (replaces scheduleSave) ---
+  const onFlowChangeRef = useRef(onFlowChange);
+  onFlowChangeRef.current = onFlowChange;
+
+  const notifyChange = useCallback(() => {
+    onFlowChangeRef.current({
+      nodes: toFlowNodes(nodesRef.current),
+      edges: toFlowEdges(edgesRef.current),
+    });
+  }, []);
+
+  // --- Spread-merge from external flow data ---
+  const mergeFromFlowInternal = useCallback((flowNodes: FlowNode[], flowEdges: FlowEdge[]) => {
+    setNodes((prev) => {
+      const prevMap = new Map(prev.map((n) => [n.id, n]));
+      return flowNodes.map((fn) => {
+        const existing = prevMap.get(fn.id);
+        if (existing) {
+          return {
+            ...existing,
+            position: { x: fn.position.x, y: fn.position.y },
+            data: { ...existing.data, label: fn.label, kind: fn.kind, config: fn.config },
+          };
+        }
+        return {
+          id: fn.id,
+          type: fn.node_type,
+          position: { x: fn.position.x, y: fn.position.y },
+          data: { label: fn.label, kind: fn.kind, config: fn.config },
+          sourcePosition: Position.Right,
+          targetPosition: Position.Left,
+        };
+      });
+    });
+    setEdges(flowEdges.map((fe) => ({
+      id: fe.id,
+      source: fe.source,
+      target: fe.target,
+      sourceHandle: "out",
+      targetHandle: "in",
+      type: "smoothstep",
+      animated: true,
+      style: EDGE_STYLE,
+    })));
+  }, [setNodes, setEdges]);
 
   // --- Seed RF state on flow switch ---
   useEffect(() => {
     if (flowId === prevFlowId.current) return;
     prevFlowId.current = flowId;
-    if (initialFlow && initialFlow.id === flowId) {
-      setNodes(toRFNodes(initialFlow));
-      setEdges(toRFEdges(initialFlow));
+    lastAppliedCounter.current = updateSignal.counter;
+    if (canonicalFlow && canonicalFlow.id === flowId) {
+      setNodes(toRFNodes(canonicalFlow));
+      setEdges(toRFEdges(canonicalFlow));
     } else {
       setNodes([]);
       setEdges([]);
     }
-  }, [flowId, initialFlow, setNodes, setEdges]);
+  }, [flowId, canonicalFlow, updateSignal.counter, setNodes, setEdges]);
+
+  // --- Apply external updates via updateSignal ---
+  useEffect(() => {
+    if (updateSignal.counter <= lastAppliedCounter.current) return;
+    lastAppliedCounter.current = updateSignal.counter;
+    if (updateSignal.source === "canvas") return; // we originated this
+    if (!canonicalFlow) return;
+    mergeFromFlowInternal(canonicalFlow.nodes, canonicalFlow.edges);
+  }, [updateSignal, canonicalFlow, mergeFromFlowInternal]);
 
   // --- Merge run status into node data ---
   useEffect(() => {
@@ -155,15 +217,6 @@ const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
     );
   }, [nodeValidationErrors, setNodes]);
 
-  // --- Snapshot emission (debounced) ---
-  useEffect(() => {
-    if (!flowId) return;
-    const timer = setTimeout(() => {
-      onFlowSnapshot({ nodes: toFlowNodes(nodes), edges: toFlowEdges(edges) });
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [nodes, edges, flowId, onFlowSnapshot]);
-
   // --- Imperative handle ---
   useImperativeHandle(ref, () => ({
     addNodeAtScreen(nodeType, kind, label, screenX, screenY) {
@@ -188,6 +241,8 @@ const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
 
       setNodes((nds) => [...nds, newNode]);
       onSelectionChange(newNode.id);
+      // setNodes hasn't flushed yet, use setTimeout so nodesRef is up to date
+      setTimeout(() => notifyChange(), 0);
 
       return {
         id: newNode.id,
@@ -226,14 +281,20 @@ const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
           };
         })
       );
+      setTimeout(() => notifyChange(), 0);
     },
 
     deleteNode(id) {
       setNodes((nds) => nds.filter((n) => n.id !== id));
       setEdges((eds) => eds.filter((e) => e.source !== id && e.target !== id));
       onSelectionChange(null);
+      setTimeout(() => notifyChange(), 0);
     },
-  }), [nodes, setNodes, setEdges, onSelectionChange]);
+
+    mergeFromFlow(flowNodes, flowEdges) {
+      mergeFromFlowInternal(flowNodes, flowEdges);
+    },
+  }), [nodes, setNodes, setEdges, onSelectionChange, notifyChange, mergeFromFlowInternal]);
 
   // --- RF event handlers ---
   const handleConnect = useCallback(
@@ -257,18 +318,28 @@ const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
           eds
         )
       );
+      setTimeout(() => notifyChange(), 0);
     },
-    [setEdges]
+    [setEdges, notifyChange]
   );
 
   const handleNodesDelete = useCallback(
     (deleted: RFNode[]) => {
       if (deleted.length > 0) {
         onSelectionChange(null);
+        setTimeout(() => notifyChange(), 0);
       }
     },
-    [onSelectionChange]
+    [onSelectionChange, notifyChange]
   );
+
+  const handleNodeDragStop = useCallback(() => {
+    notifyChange();
+  }, [notifyChange]);
+
+  const handleEdgesDelete = useCallback(() => {
+    setTimeout(() => notifyChange(), 0);
+  }, [notifyChange]);
 
   return (
     <div className="canvas-container">
@@ -279,6 +350,8 @@ const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
         onEdgesChange={onEdgesChange}
         onConnect={handleConnect}
         onNodesDelete={handleNodesDelete}
+        onNodeDragStop={handleNodeDragStop}
+        onEdgesDelete={handleEdgesDelete}
         onNodeClick={(_e, node) => onSelectionChange(node.id)}
         onPaneClick={() => onSelectionChange(null)}
         onInit={(instance) => { rfInstance.current = instance; }}

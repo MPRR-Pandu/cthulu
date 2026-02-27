@@ -20,6 +20,8 @@ pub struct Flow {
     pub enabled: bool,
     pub nodes: Vec<Node>,
     pub edges: Vec<Edge>,
+    #[serde(default)]
+    pub version: u64,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -80,6 +82,7 @@ mod tests {
                 label: "Every 4 hours".to_string(),
             }],
             edges: vec![],
+            version: 0,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };

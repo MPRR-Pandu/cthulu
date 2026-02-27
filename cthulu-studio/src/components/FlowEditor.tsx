@@ -4,15 +4,19 @@ import { registerFlowSchema } from "../lib/flow-schema";
 
 export interface FlowEditorHandle {
   revealNode: (nodeId: string) => void;
+  /** Push text into the editor from an external source (preserves undo stack). */
+  setText: (text: string) => void;
+  /** Read the current editor text without triggering a render. */
+  getText: () => string;
 }
 
 interface FlowEditorProps {
-  value: string;
+  defaultValue: string;
   onChange: (text: string) => void;
 }
 
 const FlowEditor = forwardRef<FlowEditorHandle, FlowEditorProps>(
-  function FlowEditor({ value, onChange }, ref) {
+  function FlowEditor({ defaultValue, onChange }, ref) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const editorRef = useRef<any>(null);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -57,6 +61,24 @@ const FlowEditor = forwardRef<FlowEditorHandle, FlowEditorProps>(
     );
 
     useImperativeHandle(ref, () => ({
+      setText(text: string) {
+        const editor = editorRef.current;
+        if (!editor) return;
+        const model = editor.getModel();
+        if (!model) return;
+        // Only push if text actually differs — avoids cursor jump
+        if (text === model.getValue()) return;
+        editor.executeEdits("external-update", [{
+          range: model.getFullModelRange(),
+          text,
+          forceMoveMarkers: false, // preserve cursor position
+        }]);
+      },
+
+      getText() {
+        return editorRef.current?.getModel()?.getValue() ?? "";
+      },
+
       revealNode(nodeId: string) {
         const editor = editorRef.current;
         const monaco = monacoRef.current;
@@ -118,7 +140,7 @@ const FlowEditor = forwardRef<FlowEditorHandle, FlowEditorProps>(
     return (
       <Editor
         language="json"
-        value={value}
+        defaultValue={defaultValue}
         onChange={handleChange}
         onMount={handleMount}
         theme="cthulu-dark"

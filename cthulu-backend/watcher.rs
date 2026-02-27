@@ -85,7 +85,6 @@ impl FileChangeWatcher {
                     let agent_repo = agent_repo.clone();
                     let prompt_repo = prompt_repo.clone();
                     let changes_tx = changes_tx.clone();
-                    let path = path.clone();
                     let filename = filename.clone();
 
                     rt.spawn(async move {
@@ -101,27 +100,23 @@ impl FileChangeWatcher {
                             return;
                         }
 
-                        let file_exists = path.exists();
+                        // Try reload first; if that fails, try evict (avoids TOCTOU with path.exists())
+                        let reload_id = match resource_type {
+                            ResourceType::Flow => flow_repo.reload_file(&filename).await,
+                            ResourceType::Agent => agent_repo.reload_file(&filename).await,
+                            ResourceType::Prompt => prompt_repo.reload_file(&filename).await,
+                        };
 
-                        let (change_type, resource_id) = if file_exists {
-                            // File exists — reload into cache
-                            let id = match resource_type {
-                                ResourceType::Flow => flow_repo.reload_file(&filename).await,
-                                ResourceType::Agent => agent_repo.reload_file(&filename).await,
-                                ResourceType::Prompt => prompt_repo.reload_file(&filename).await,
-                            };
-                            match id {
-                                Some(id) => (ChangeType::Updated, id),
-                                None => return, // couldn't parse, skip
-                            }
+                        let (change_type, resource_id) = if let Some(id) = reload_id {
+                            (ChangeType::Updated, id)
                         } else {
-                            // File deleted — evict from cache
-                            let id = match resource_type {
+                            // File gone or unparseable — evict from cache
+                            let evict_id = match resource_type {
                                 ResourceType::Flow => flow_repo.evict_file(&filename).await,
                                 ResourceType::Agent => agent_repo.evict_file(&filename).await,
                                 ResourceType::Prompt => prompt_repo.evict_file(&filename).await,
                             };
-                            match id {
+                            match evict_id {
                                 Some(id) => (ChangeType::Deleted, id),
                                 None => return, // wasn't in cache, skip
                             }

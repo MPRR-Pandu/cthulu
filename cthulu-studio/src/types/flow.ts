@@ -29,6 +29,7 @@ export interface Flow {
   enabled: boolean;
   nodes: FlowNode[];
   edges: FlowEdge[];
+  version: number;
   created_at: string;
   updated_at: string;
 }

@@ -1,5 +1,6 @@
-import { useState, useCallback, useRef, type RefObject } from "react";
+import { useState, useCallback, useRef, useEffect, type RefObject } from "react";
 import { STUDIO_ASSISTANT_ID, type Flow, type FlowNode, type FlowEdge, type RunEvent } from "../types/flow";
+import type { UpdateSignal } from "../hooks/useFlowDispatch";
 import Canvas, { type CanvasHandle } from "./Canvas";
 import FlowEditor, { type FlowEditorHandle } from "./FlowEditor";
 import RunLog from "./RunLog";
@@ -8,9 +9,11 @@ import ErrorBoundary from "./ErrorBoundary";
 
 interface FlowWorkspaceViewProps {
   flowId: string | null;
-  initialFlow: Flow | null;
+  canonicalFlow: Flow | null;
+  updateSignal: UpdateSignal;
   canvasRef: RefObject<CanvasHandle | null>;
-  onFlowSnapshot: (snapshot: { nodes: FlowNode[]; edges: FlowEdge[] }) => void;
+  onCanvasChange: (updates: { nodes: FlowNode[]; edges: FlowEdge[] }) => void;
+  onEditorChange: (text: string) => void;
   onSelectionChange: (nodeId: string | null) => void;
   selectedNodeId: string | null;
   nodeRunStatus: Record<string, "running" | "completed" | "failed">;
@@ -18,7 +21,6 @@ interface FlowWorkspaceViewProps {
   onRunEventsClear: () => void;
   runLogOpen: boolean;
   onRunLogClose: () => void;
-  activeFlowMeta: { id: string; name: string; description: string; enabled: boolean } | null;
 }
 
 const MIN_EDITOR_WIDTH = 280;
@@ -32,9 +34,11 @@ type BottomTab = "log" | "terminal";
 
 export default function FlowWorkspaceView({
   flowId,
-  initialFlow,
+  canonicalFlow,
+  updateSignal,
   canvasRef,
-  onFlowSnapshot,
+  onCanvasChange,
+  onEditorChange,
   onSelectionChange,
   selectedNodeId,
   nodeRunStatus,
@@ -42,90 +46,48 @@ export default function FlowWorkspaceView({
   onRunEventsClear,
   runLogOpen,
   onRunLogClose,
-  activeFlowMeta,
 }: FlowWorkspaceViewProps) {
-  const [flowText, setFlowText] = useState("");
   const [editorWidth, setEditorWidth] = useState(DEFAULT_EDITOR_WIDTH);
   const [bottomHeight, setBottomHeight] = useState(DEFAULT_BOTTOM_HEIGHT);
   const [bottomOpen, setBottomOpen] = useState(false);
   const [bottomTab, setBottomTab] = useState<BottomTab>("log");
 
-  const syncSource = useRef<"editor" | "canvas">("canvas");
   const editorRef = useRef<FlowEditorHandle>(null);
   const hDragRef = useRef<{ startX: number; startW: number } | null>(null);
   const vDragRef = useRef<{ startY: number; startH: number } | null>(null);
 
-  // Track flow switches — seed editor text from initialFlow
-  const prevFlowIdRef = useRef<string | null>(null);
-  if (flowId !== prevFlowIdRef.current) {
-    prevFlowIdRef.current = flowId;
-    if (initialFlow && initialFlow.id === flowId) {
-      const text = JSON.stringify(initialFlow, null, 2);
-      setFlowText(text);
-      syncSource.current = "canvas"; // initial load from flow data, treat as canvas source
-    } else {
-      setFlowText("");
-    }
+  // Monaco is uncontrolled — we push text imperatively via editorRef.setText().
+  // This avoids the value-prop round-trip that causes cursor jumps.
+  const lastEditorCounter = useRef(0);
+  const editorDefaultText = useRef("");
+
+  // Compute initial/switch text for defaultValue (only used at mount)
+  const initialEditorText = canonicalFlow ? JSON.stringify(canonicalFlow, null, 2) : "";
+  if (updateSignal.source === "init" && updateSignal.counter > 0) {
+    editorDefaultText.current = initialEditorText;
   }
+
+  useEffect(() => {
+    if (updateSignal.counter <= lastEditorCounter.current) return;
+    lastEditorCounter.current = updateSignal.counter;
+    // When the editor itself originated the change, don't touch Monaco
+    if (updateSignal.source === "editor") return;
+    const text = canonicalFlow ? JSON.stringify(canonicalFlow, null, 2) : "";
+    editorRef.current?.setText(text);
+  }, [updateSignal, canonicalFlow]);
+
+  const handleLocalEditorChange = useCallback(
+    (text: string) => {
+      onEditorChange(text);
+    },
+    [onEditorChange]
+  );
 
   // Open bottom pane when run log is requested
   if (runLogOpen && !bottomOpen) {
     setBottomOpen(true);
     setBottomTab("log");
   }
-
-  // --- Editor → Canvas sync ---
-  const handleEditorChange = useCallback(
-    (text: string) => {
-      setFlowText(text);
-
-      if (syncSource.current === "canvas") {
-        syncSource.current = "editor";
-        return;
-      }
-
-      syncSource.current = "editor";
-
-      try {
-        const parsed = JSON.parse(text) as Flow;
-        if (!Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) return;
-        canvasRef.current?.mergeFromFlow(parsed.nodes, parsed.edges);
-      } catch {
-        // Invalid JSON mid-edit — ignore
-      }
-    },
-    [canvasRef]
-  );
-
-  // --- Canvas → Editor sync ---
-  const handleCanvasSnapshot = useCallback(
-    (snapshot: { nodes: FlowNode[]; edges: FlowEdge[] }) => {
-      // Always forward to parent for API save + validation
-      onFlowSnapshot(snapshot);
-
-      if (syncSource.current === "editor") {
-        syncSource.current = "canvas";
-        return;
-      }
-
-      syncSource.current = "canvas";
-
-      // Build full flow object for serialization
-      if (!activeFlowMeta) return;
-      const flow: Flow = {
-        id: activeFlowMeta.id,
-        name: activeFlowMeta.name,
-        description: activeFlowMeta.description,
-        enabled: activeFlowMeta.enabled,
-        nodes: snapshot.nodes,
-        edges: snapshot.edges,
-        created_at: initialFlow?.created_at ?? "",
-        updated_at: new Date().toISOString(),
-      };
-      setFlowText(JSON.stringify(flow, null, 2));
-    },
-    [onFlowSnapshot, activeFlowMeta, initialFlow]
-  );
 
   // --- Click-to-jump: Canvas selection → Editor highlight ---
   const handleSelectionChange = useCallback(
@@ -209,8 +171,9 @@ export default function FlowWorkspaceView({
             <Canvas
               ref={canvasRef}
               flowId={flowId}
-              initialFlow={initialFlow}
-              onFlowSnapshot={handleCanvasSnapshot}
+              canonicalFlow={canonicalFlow}
+              updateSignal={updateSignal}
+              onFlowChange={onCanvasChange}
               onSelectionChange={handleSelectionChange}
               nodeRunStatus={nodeRunStatus}
             />
@@ -231,9 +194,10 @@ export default function FlowWorkspaceView({
             />
             <div className="flow-workspace-editor" style={{ width: editorWidth }}>
               <FlowEditor
+                key={flowId}
                 ref={editorRef}
-                value={flowText}
-                onChange={handleEditorChange}
+                defaultValue={editorDefaultText.current}
+                onChange={handleLocalEditorChange}
               />
             </div>
           </>

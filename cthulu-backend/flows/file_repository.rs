@@ -1,5 +1,6 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
+use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
@@ -15,7 +16,8 @@ pub struct FileFlowRepository {
     flows: RwLock<HashMap<String, Flow>>,
     runs: RwLock<HashMap<String, VecDeque<FlowRun>>>,
     /// Filenames written by this process — used to skip fs-watcher events for our own writes.
-    self_writes: std::sync::Mutex<HashSet<String>>,
+    /// Maps filename -> write timestamp for time-based expiry.
+    self_writes: std::sync::Mutex<HashMap<String, Instant>>,
 }
 
 impl FileFlowRepository {
@@ -24,7 +26,7 @@ impl FileFlowRepository {
             base_dir,
             flows: RwLock::new(HashMap::new()),
             runs: RwLock::new(HashMap::new()),
-            self_writes: std::sync::Mutex::new(HashSet::new()),
+            self_writes: std::sync::Mutex::new(HashMap::new()),
         }
     }
 
@@ -58,23 +60,41 @@ impl FileFlowRepository {
 
     /// Mark a filename as written by this process (for fs-watcher loop prevention).
     pub fn mark_self_write(&self, filename: &str) {
-        self.self_writes.lock().unwrap().insert(filename.to_string());
+        self.self_writes.lock().unwrap().insert(filename.to_string(), Instant::now());
     }
 
-    /// Consume (remove) a self-write marker. Returns true if the filename was present.
+    /// Check if filename was recently written by this process (within 2s).
+    /// Returns true if a recent self-write is found (keeps the entry for repeated checks).
+    /// Returns false and removes stale entries if age >= 2s or absent.
     pub fn consume_self_write(&self, filename: &str) -> bool {
-        self.self_writes.lock().unwrap().remove(filename)
+        let mut map = self.self_writes.lock().unwrap();
+        if let Some(written_at) = map.get(filename) {
+            if written_at.elapsed() < std::time::Duration::from_secs(2) {
+                return true;
+            }
+            map.remove(filename);
+        }
+        false
     }
 
     /// Re-read a single flow JSON file from disk into the cache. Returns the resource ID if successful.
+    /// Retries once after 100ms on parse failure (edge case on some filesystems).
     pub async fn reload_file(&self, filename: &str) -> Option<String> {
         let path = self.flows_dir().join(filename);
-        let content = std::fs::read_to_string(&path).ok()?;
-        let flow: Flow = serde_json::from_str(&content).ok()?;
-        let id = flow.id.clone();
-        self.flows.write().await.insert(id.clone(), flow);
-        tracing::debug!(flow_id = %id, filename, "reloaded flow from disk");
-        Some(id)
+        for attempt in 0..2 {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                if let Ok(flow) = serde_json::from_str::<Flow>(&content) {
+                    let id = flow.id.clone();
+                    self.flows.write().await.insert(id.clone(), flow);
+                    tracing::debug!(flow_id = %id, filename, "reloaded flow from disk");
+                    return Some(id);
+                }
+            }
+            if attempt == 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+        }
+        None
     }
 
     /// Remove a flow from the cache by filename. Returns the resource ID if it was present.
@@ -124,8 +144,11 @@ impl FlowRepository for FileFlowRepository {
         let path = dir.join(&filename);
         let content = serde_json::to_string_pretty(&flow)
             .context("failed to serialize flow")?;
-        std::fs::write(&path, content)
-            .with_context(|| format!("failed to write flow file: {}", path.display()))?;
+        let tmp_path = path.with_extension("json.tmp");
+        std::fs::write(&tmp_path, &content)
+            .with_context(|| format!("failed to write flow temp file: {}", tmp_path.display()))?;
+        std::fs::rename(&tmp_path, &path)
+            .with_context(|| format!("failed to rename flow file: {}", path.display()))?;
 
         self.flows.write().await.insert(flow.id.clone(), flow);
         Ok(())
@@ -336,6 +359,7 @@ mod tests {
                 label: "Cron".to_string(),
             }],
             edges: vec![],
+            version: 0,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }

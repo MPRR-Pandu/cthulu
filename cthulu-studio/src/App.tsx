@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import * as api from "./api/client";
 import { log } from "./api/logger";
 import { subscribeToRuns } from "./api/runStream";
@@ -16,13 +16,13 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { useFlowDispatch } from "./hooks/useFlowDispatch";
 
 type ActiveView = "flow-editor" | "agent-workspace";
 
 export default function App() {
   const [flows, setFlows] = useState<FlowSummary[]>([]);
   const [activeFlowId, setActiveFlowId] = useState<string | null>(null);
-  const [initialFlow, setInitialFlow] = useState<Flow | null>(null);
   const [nodeTypes, setNodeTypes] = useState<NodeTypeSchema[]>([]);
 
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -36,9 +36,33 @@ export default function App() {
   const [runLogOpen, setRunLogOpen] = useState(false);
   const [activeView, setActiveView] = useState<ActiveView>("flow-editor");
 
-  // Keep a light reference for TopBar (name, enabled) without driving Canvas
-  const [activeFlowMeta, setActiveFlowMeta] = useState<{ id: string; name: string; description: string; enabled: boolean } | null>(null);
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // --- Central flow state (extracted hook) ---
+  const activeFlowIdRef = useRef(activeFlowId);
+  activeFlowIdRef.current = activeFlowId;
+
+  const loadFlows = async () => {
+    try { setFlows(await api.listFlows()); } catch { /* logged */ }
+  };
+
+  const dispatchApi = useMemo(() => ({
+    onSaveComplete: loadFlows,
+    updateFlow: api.updateFlow,
+    getFlow: api.getFlow,
+  }), []);
+
+  const {
+    canonicalFlow,
+    updateSignal,
+    flowVersionRef,
+    dispatchFlowUpdate,
+    initFlow,
+  } = useFlowDispatch(dispatchApi, activeFlowIdRef);
+
+  const activeFlowMeta = useMemo(() => {
+    if (!canonicalFlow || !activeFlowId) return null;
+    return { id: canonicalFlow.id, name: canonicalFlow.name, description: canonicalFlow.description, enabled: canonicalFlow.enabled };
+  }, [canonicalFlow, activeFlowId]);
+
   const canvasRef = useRef<CanvasHandle>(null);
 
   // --- Server URL state ---
@@ -141,23 +165,21 @@ export default function App() {
   }, []);
 
   // --- File change subscription (SSE) ---
-  const activeFlowIdRef = useRef(activeFlowId);
-  activeFlowIdRef.current = activeFlowId;
-  // Suppress the next auto-save when we receive an external update, to avoid write-back loops.
-  const suppressSaveRef = useRef(false);
-
   useEffect(() => {
     const cleanup = api.subscribeToChanges((event) => {
       if (event.resource_type === "flow") {
         loadFlows();
-        // If the active flow was updated externally, re-fetch and merge into canvas
+        // If the active flow was updated externally, re-fetch and dispatch
         if (activeFlowIdRef.current && event.resource_id === activeFlowIdRef.current && event.change_type === "updated") {
           api.getFlow(activeFlowIdRef.current).then((flow) => {
-            setActiveFlowMeta({ id: flow.id, name: flow.name, description: flow.description, enabled: flow.enabled });
-            // Suppress the auto-save that will fire when canvas state changes
-            suppressSaveRef.current = true;
-            // Use imperative merge to update the canvas without triggering a flow switch
-            canvasRef.current?.mergeFromFlow(flow.nodes, flow.edges);
+            dispatchFlowUpdate("server", {
+              nodes: flow.nodes,
+              edges: flow.edges,
+              name: flow.name,
+              description: flow.description,
+              enabled: flow.enabled,
+              version: flow.version,
+            });
           }).catch(() => { /* logged */ });
         }
       } else if (event.resource_type === "agent") {
@@ -166,12 +188,7 @@ export default function App() {
       // prompt_change: no-op for now
     });
     return cleanup;
-  }, []);
-
-  // --- API helpers ---
-  const loadFlows = async () => {
-    try { setFlows(await api.listFlows()); } catch { /* logged */ }
-  };
+  }, [dispatchFlowUpdate]);
 
   const loadNodeTypes = async () => {
     try { setNodeTypes(await api.getNodeTypes()); } catch { /* logged */ }
@@ -185,9 +202,8 @@ export default function App() {
   const selectFlow = async (id: string) => {
     try {
       const flow = await api.getFlow(id);
-      setInitialFlow(flow);
       setActiveFlowId(flow.id);
-      setActiveFlowMeta({ id: flow.id, name: flow.name, description: flow.description, enabled: flow.enabled });
+      initFlow(flow);
       setSelectedNodeId(null);
       setActiveView("flow-editor");
     } catch { /* logged */ }
@@ -223,27 +239,28 @@ export default function App() {
     } catch { /* logged */ }
   };
 
-  // --- Snapshot callback: Canvas pushes state here for persistence ---
-  const handleFlowSnapshot = useCallback((snapshot: { nodes: FlowNode[]; edges: FlowEdge[] }) => {
-    if (!activeFlowId || !activeFlowMeta) return;
-    // Skip save if this snapshot was triggered by an external file change
-    if (suppressSaveRef.current) {
-      suppressSaveRef.current = false;
-      return;
+  // --- Canvas change callback ---
+  const handleCanvasChange = useCallback((updates: { nodes: FlowNode[]; edges: FlowEdge[] }) => {
+    dispatchFlowUpdate("canvas", updates);
+  }, [dispatchFlowUpdate]);
+
+  // --- Editor change callback ---
+  const handleEditorChange = useCallback((text: string) => {
+    try {
+      const parsed = JSON.parse(text) as Flow;
+      if (!Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) return;
+
+      // Strip version — version is server-controlled only
+      dispatchFlowUpdate("editor", {
+        nodes: parsed.nodes,
+        edges: parsed.edges,
+        name: parsed.name,
+        description: parsed.description,
+      });
+    } catch {
+      // Invalid JSON mid-edit — ignore
     }
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(async () => {
-      try {
-        await api.updateFlow(activeFlowId, {
-          name: activeFlowMeta.name,
-          description: activeFlowMeta.description,
-          nodes: snapshot.nodes,
-          edges: snapshot.edges,
-        });
-        loadFlows();
-      } catch { /* logged */ }
-    }, 500);
-  }, [activeFlowId, activeFlowMeta]);
+  }, [dispatchFlowUpdate]);
 
   const handleSelectionChange = useCallback((nodeId: string | null) => {
     setSelectedNodeId(nodeId);
@@ -251,12 +268,7 @@ export default function App() {
 
   const handleRename = async (name: string) => {
     if (!activeFlowMeta || !activeFlowId) return;
-    const updated = { ...activeFlowMeta, name };
-    setActiveFlowMeta(updated);
-    try {
-      await api.updateFlow(activeFlowId, { name });
-      loadFlows();
-    } catch { /* logged */ }
+    dispatchFlowUpdate("app", { name });
   };
 
   const handleTrigger = async () => {
@@ -276,7 +288,7 @@ export default function App() {
       prev.map((f) => (f.id === flowId ? { ...f, enabled: newEnabled } : f))
     );
     if (activeFlowMeta && activeFlowMeta.id === flowId) {
-      setActiveFlowMeta((prev) => prev ? { ...prev, enabled: newEnabled } : prev);
+      dispatchFlowUpdate("app", { enabled: newEnabled });
     }
     try {
       await api.updateFlow(flowId, { enabled: newEnabled });
@@ -326,9 +338,11 @@ export default function App() {
         <div style={{ display: activeView === "flow-editor" ? "contents" : "none" }}>
           <FlowWorkspaceView
             flowId={activeFlowId}
-            initialFlow={initialFlow}
+            canonicalFlow={canonicalFlow}
+            updateSignal={updateSignal}
             canvasRef={canvasRef}
-            onFlowSnapshot={handleFlowSnapshot}
+            onCanvasChange={handleCanvasChange}
+            onEditorChange={handleEditorChange}
             onSelectionChange={handleSelectionChange}
             selectedNodeId={selectedNodeId}
             nodeRunStatus={nodeRunStatus}
@@ -336,7 +350,6 @@ export default function App() {
             onRunEventsClear={() => setRunEvents([])}
             runLogOpen={runLogOpen}
             onRunLogClose={() => setRunLogOpen(false)}
-            activeFlowMeta={activeFlowMeta}
           />
         </div>
         {[...visitedAgents.entries()].map(([agentId, agentName]) => (

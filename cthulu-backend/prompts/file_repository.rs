@@ -1,5 +1,6 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -12,7 +13,8 @@ pub struct FilePromptRepository {
     base_dir: PathBuf,
     prompts: RwLock<HashMap<String, SavedPrompt>>,
     /// Filenames written by this process — used to skip fs-watcher events for our own writes.
-    self_writes: std::sync::Mutex<HashSet<String>>,
+    /// Maps filename -> write timestamp for time-based expiry.
+    self_writes: std::sync::Mutex<HashMap<String, Instant>>,
 }
 
 impl FilePromptRepository {
@@ -20,29 +22,47 @@ impl FilePromptRepository {
         Self {
             base_dir: base_dir.as_ref().to_path_buf(),
             prompts: RwLock::new(HashMap::new()),
-            self_writes: std::sync::Mutex::new(HashSet::new()),
+            self_writes: std::sync::Mutex::new(HashMap::new()),
         }
     }
 
     /// Mark a filename as written by this process (for fs-watcher loop prevention).
     pub fn mark_self_write(&self, filename: &str) {
-        self.self_writes.lock().unwrap().insert(filename.to_string());
+        self.self_writes.lock().unwrap().insert(filename.to_string(), Instant::now());
     }
 
-    /// Consume (remove) a self-write marker. Returns true if the filename was present.
+    /// Check if filename was recently written by this process (within 2s).
+    /// Returns true if a recent self-write is found (keeps the entry for repeated checks).
+    /// Returns false and removes stale entries if age >= 2s or absent.
     pub fn consume_self_write(&self, filename: &str) -> bool {
-        self.self_writes.lock().unwrap().remove(filename)
+        let mut map = self.self_writes.lock().unwrap();
+        if let Some(written_at) = map.get(filename) {
+            if written_at.elapsed() < std::time::Duration::from_secs(2) {
+                return true;
+            }
+            map.remove(filename);
+        }
+        false
     }
 
     /// Re-read a single prompt JSON file from disk into the cache. Returns the resource ID if successful.
+    /// Retries once after 100ms on parse failure (edge case on some filesystems).
     pub async fn reload_file(&self, filename: &str) -> Option<String> {
         let path = self.prompts_dir().join(filename);
-        let content = std::fs::read_to_string(&path).ok()?;
-        let prompt: SavedPrompt = serde_json::from_str(&content).ok()?;
-        let id = prompt.id.clone();
-        self.prompts.write().await.insert(id.clone(), prompt);
-        tracing::debug!(prompt_id = %id, filename, "reloaded prompt from disk");
-        Some(id)
+        for attempt in 0..2 {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                if let Ok(prompt) = serde_json::from_str::<SavedPrompt>(&content) {
+                    let id = prompt.id.clone();
+                    self.prompts.write().await.insert(id.clone(), prompt);
+                    tracing::debug!(prompt_id = %id, filename, "reloaded prompt from disk");
+                    return Some(id);
+                }
+            }
+            if attempt == 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+        }
+        None
     }
 
     /// Remove a prompt from the cache by filename. Returns the resource ID if it was present.
@@ -80,8 +100,11 @@ impl PromptRepository for FilePromptRepository {
         let path = dir.join(&filename);
         let content = serde_json::to_string_pretty(&prompt)
             .context("failed to serialize prompt")?;
-        std::fs::write(&path, content)
-            .with_context(|| format!("failed to write prompt file: {}", path.display()))?;
+        let tmp_path = path.with_extension("json.tmp");
+        std::fs::write(&tmp_path, &content)
+            .with_context(|| format!("failed to write prompt temp file: {}", tmp_path.display()))?;
+        std::fs::rename(&tmp_path, &path)
+            .with_context(|| format!("failed to rename prompt file: {}", path.display()))?;
 
         self.prompts.write().await.insert(prompt.id.clone(), prompt);
         Ok(())

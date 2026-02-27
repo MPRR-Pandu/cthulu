@@ -420,6 +420,7 @@ pub fn parse_template_yaml(yaml: &str) -> Result<Flow> {
         enabled: false, // Always disabled on import — safe default
         nodes,
         edges,
+        version: 0,
         created_at: now,
         updated_at: now,
     })

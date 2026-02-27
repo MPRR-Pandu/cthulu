@@ -1,5 +1,6 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -14,7 +15,8 @@ pub struct FileAgentRepository {
     agents: RwLock<HashMap<String, Agent>>,
     dir: PathBuf,
     /// Filenames written by this process — used to skip fs-watcher events for our own writes.
-    self_writes: std::sync::Mutex<HashSet<String>>,
+    /// Maps filename -> write timestamp for time-based expiry.
+    self_writes: std::sync::Mutex<HashMap<String, Instant>>,
 }
 
 impl FileAgentRepository {
@@ -22,29 +24,47 @@ impl FileAgentRepository {
         Self {
             agents: RwLock::new(HashMap::new()),
             dir: base_dir.as_ref().join("agents"),
-            self_writes: std::sync::Mutex::new(HashSet::new()),
+            self_writes: std::sync::Mutex::new(HashMap::new()),
         }
     }
 
     /// Mark a filename as written by this process (for fs-watcher loop prevention).
     pub fn mark_self_write(&self, filename: &str) {
-        self.self_writes.lock().unwrap().insert(filename.to_string());
+        self.self_writes.lock().unwrap().insert(filename.to_string(), Instant::now());
     }
 
-    /// Consume (remove) a self-write marker. Returns true if the filename was present.
+    /// Check if filename was recently written by this process (within 2s).
+    /// Returns true if a recent self-write is found (keeps the entry for repeated checks).
+    /// Returns false and removes stale entries if age >= 2s or absent.
     pub fn consume_self_write(&self, filename: &str) -> bool {
-        self.self_writes.lock().unwrap().remove(filename)
+        let mut map = self.self_writes.lock().unwrap();
+        if let Some(written_at) = map.get(filename) {
+            if written_at.elapsed() < std::time::Duration::from_secs(2) {
+                return true;
+            }
+            map.remove(filename);
+        }
+        false
     }
 
     /// Re-read a single agent JSON file from disk into the cache. Returns the resource ID if successful.
+    /// Retries once after 100ms on parse failure (edge case on some filesystems).
     pub async fn reload_file(&self, filename: &str) -> Option<String> {
         let path = self.dir.join(filename);
-        let content = std::fs::read_to_string(&path).ok()?;
-        let agent: Agent = serde_json::from_str(&content).ok()?;
-        let id = agent.id.clone();
-        self.agents.write().await.insert(id.clone(), agent);
-        tracing::debug!(agent_id = %id, filename, "reloaded agent from disk");
-        Some(id)
+        for attempt in 0..2 {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                if let Ok(agent) = serde_json::from_str::<Agent>(&content) {
+                    let id = agent.id.clone();
+                    self.agents.write().await.insert(id.clone(), agent);
+                    tracing::debug!(agent_id = %id, filename, "reloaded agent from disk");
+                    return Some(id);
+                }
+            }
+            if attempt == 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+        }
+        None
     }
 
     /// Remove an agent from the cache by filename. Returns the resource ID if it was present.

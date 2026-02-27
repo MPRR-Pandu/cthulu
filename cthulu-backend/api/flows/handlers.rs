@@ -72,6 +72,7 @@ pub(crate) async fn create_flow(
         enabled: true,
         nodes: body.nodes,
         edges: body.edges,
+        version: 0,
         created_at: now,
         updated_at: now,
     };
@@ -111,6 +112,8 @@ pub(crate) struct UpdateFlowRequest {
     nodes: Option<Vec<Node>>,
     #[serde(default)]
     edges: Option<Vec<Edge>>,
+    #[serde(default)]
+    version: Option<u64>,
 }
 
 pub(crate) async fn update_flow(
@@ -124,6 +127,19 @@ pub(crate) async fn update_flow(
             Json(json!({ "error": "flow not found" })),
         )
     })?;
+
+    // Optimistic concurrency: reject stale writes
+    if let Some(client_version) = body.version {
+        if client_version < flow.version {
+            return Err((
+                StatusCode::CONFLICT,
+                Json(json!({
+                    "error": "conflict",
+                    "server_version": flow.version
+                })),
+            ));
+        }
+    }
 
     if let Some(name) = body.name {
         flow.name = name;
@@ -140,6 +156,7 @@ pub(crate) async fn update_flow(
     if let Some(edges) = body.edges {
         flow.edges = edges;
     }
+    flow.version += 1;
     flow.updated_at = Utc::now();
 
     state.flow_repo.save_flow(flow.clone()).await.map_err(|e| {

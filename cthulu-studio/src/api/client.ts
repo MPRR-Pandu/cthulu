@@ -115,6 +115,7 @@ export async function updateFlow(
     enabled?: boolean;
     nodes?: FlowNode[];
     edges?: FlowEdge[];
+    version?: number;
   }
 ): Promise<Flow> {
   return apiFetch<Flow>(`/flows/${id}`, {

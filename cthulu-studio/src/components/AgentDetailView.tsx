@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import AgentEditor from "./AgentEditor";
 import FlowRunChatView from "./FlowRunChatView";
-import NodeTerminal from "./NodeTerminal";
+import AgentChatView from "./AgentChatView";
 import SessionTabBar from "./SessionTabBar";
 import {
   listAgentSessions,
@@ -213,11 +213,9 @@ export default function AgentDetailView({
                     flowRun={session?.flow_run}
                   />
                 ) : (
-                  <NodeTerminal
+                  <AgentChatView
                     agentId={agentId}
                     sessionId={sessionId}
-                    nodeLabel={agentName}
-                    runtime="local"
                   />
                 )}
               </div>

@@ -2245,6 +2245,7 @@ button:disabled {
   flex: 1;
   overflow-y: auto;
   padding: 8px 12px;
+  max-width: 720px;
 }
 
 /* Messages: no bubbles, no avatars, tight */
@@ -2435,4 +2436,73 @@ button:disabled {
   font-size: 9px;
   color: var(--accent);
   margin-right: 2px;
+}
+
+/* ── Agent chat composer ──────────────────────────────────────────── */
+
+.ac-footer {
+  padding: 6px 10px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.ac-footer form,
+.ac-footer [data-aui-composer-root] {
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+}
+
+.ac-footer textarea {
+  flex: 1;
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-size: 13px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text);
+  padding: 6px 8px;
+  resize: none;
+  outline: none;
+  min-height: 28px;
+  max-height: 120px;
+}
+
+.ac-footer textarea:focus { border-color: var(--accent); }
+
+.ac-btn {
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.ac-btn:hover { background: var(--bg-tertiary); }
+.ac-btn:disabled { opacity: 0.4; cursor: default; }
+.ac-btn-stop { border-color: var(--danger); color: var(--danger); }
+.ac-btn-stop:hover { background: color-mix(in srgb, var(--danger) 10%, var(--bg-secondary)); }
+
+/* ── Sidebar agent meta ───────────────────────────────────────────── */
+
+.sidebar-agent-meta {
+  font-size: 10px;
+  color: var(--text-secondary);
+  padding-left: 10px;
+  margin-top: 1px;
+}
+
+.sidebar-agent-busy {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success);
+  margin-right: 4px;
+  vertical-align: middle;
+  animation: fr-pulse 1.5s ease-in-out infinite;
 }

@@ -1,6 +1,13 @@
-import { useState, useEffect, useRef, useCallback } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import {
+  AssistantRuntimeProvider,
+  useExternalStoreRuntime,
+  ThreadPrimitive,
+  MessagePrimitive,
+  type ThreadMessageLike,
+} from "@assistant-ui/react";
+import { MarkdownTextPrimitive } from "@assistant-ui/react-markdown";
+import type { ToolCallMessagePartProps } from "@assistant-ui/react";
 import { getSessionLog, streamSessionLog } from "../api/client";
 import type { FlowRunMeta } from "../api/client";
 
@@ -11,91 +18,267 @@ interface FlowRunChatViewProps {
   flowRun?: FlowRunMeta;
 }
 
-// Parsed event types from stream-json
-type ParsedEvent =
-  | { type: "system"; data: Record<string, unknown> }
-  | { type: "assistant_text"; text: string }
-  | { type: "tool_use"; tool: string; input: string }
-  | { type: "tool_result"; content: string; is_error: boolean }
-  | {
-      type: "result";
-      text: string;
-      cost: number;
-      turns: number;
-    }
-  | { type: "raw"; line: string };
+// ── Stream-JSON → assistant-ui message conversion ───────────────────
 
-function parseLine(raw: string): ParsedEvent | null {
-  if (!raw.trim()) return null;
+interface RawLine {
+  raw: string;
+  parsed: Record<string, unknown> | null;
+}
 
+function parseRawLine(raw: string): RawLine {
   try {
-    const obj = JSON.parse(raw);
-    const eventType = obj.type;
+    return { raw, parsed: JSON.parse(raw) };
+  } catch {
+    return { raw, parsed: null };
+  }
+}
+
+/**
+ * Convert an array of stream-json lines into assistant-ui ThreadMessageLike[].
+ *
+ * Claude stream-json has event types: system, assistant, result, content_block_start, etc.
+ * We group these into assistant messages with text + tool-call content parts.
+ */
+function linesToMessages(lines: RawLine[]): ThreadMessageLike[] {
+  const messages: ThreadMessageLike[] = [];
+
+  type ContentPart = ThreadMessageLike["content"] extends string | infer U
+    ? U extends readonly (infer P)[]
+      ? P
+      : never
+    : never;
+
+  let currentParts: ContentPart[] = [];
+
+  const flushAssistant = () => {
+    if (currentParts.length > 0) {
+      messages.push({
+        role: "assistant" as const,
+        content: currentParts,
+      });
+      currentParts = [];
+    }
+  };
+
+  for (const { parsed } of lines) {
+    if (!parsed) continue;
+    const eventType = parsed.type as string;
 
     if (eventType === "system") {
-      return { type: "system", data: obj };
+      continue;
     }
 
     if (eventType === "assistant") {
-      const content = obj.message?.content;
-      if (Array.isArray(content)) {
-        // Extract text blocks
-        const textParts: string[] = [];
-        const events: ParsedEvent[] = [];
-        for (const block of content) {
-          if (block.type === "text" && block.text) {
-            textParts.push(block.text);
-          } else if (block.type === "tool_use") {
-            events.push({
-              type: "tool_use",
-              tool: block.name || "?",
-              input:
-                typeof block.input === "string"
-                  ? block.input
-                  : JSON.stringify(block.input, null, 2),
-            });
-          } else if (block.type === "tool_result") {
-            events.push({
-              type: "tool_result",
-              content:
-                typeof block.content === "string"
-                  ? block.content
-                  : JSON.stringify(block.content),
-              is_error: !!block.is_error,
-            });
-          }
+      const content = (parsed.message as Record<string, unknown>)
+        ?.content as Array<Record<string, unknown>> | undefined;
+      if (!Array.isArray(content)) continue;
+
+      for (const block of content) {
+        const blockType = block.type as string;
+        if (blockType === "text" && block.text) {
+          currentParts.push({
+            type: "text" as const,
+            text: block.text as string,
+          });
+        } else if (blockType === "tool_use") {
+          const toolCallId =
+            (block.id as string) ||
+            `tool-${messages.length}-${currentParts.length}`;
+          currentParts.push({
+            type: "tool-call" as const,
+            toolCallId,
+            toolName: (block.name as string) || "unknown",
+            args: (typeof block.input === "object" && block.input !== null
+              ? block.input
+              : {}) as Record<string, string | number | boolean | null>,
+            result:
+              block.result !== undefined
+                ? (block.result as unknown)
+                : undefined,
+          });
+        } else if (blockType === "tool_result") {
+          const resultContent =
+            typeof block.content === "string"
+              ? block.content
+              : JSON.stringify(block.content);
+          currentParts.push({
+            type: "text" as const,
+            text: `\`\`\`\n${resultContent}\n\`\`\``,
+          });
         }
-        // Return first meaningful event (text takes priority)
-        if (textParts.length > 0) {
-          return { type: "assistant_text", text: textParts.join("\n") };
-        }
-        if (events.length > 0) return events[0];
       }
-      return null;
+
+      flushAssistant();
+      continue;
     }
 
     if (eventType === "result") {
-      return {
-        type: "result",
-        text: obj.result || "",
-        cost: obj.total_cost_usd || 0,
-        turns: obj.num_turns || 0,
-      };
+      flushAssistant();
+
+      const resultText = (parsed.result as string) || "";
+      if (resultText) {
+        messages.push({
+          role: "assistant" as const,
+          content: resultText,
+        });
+      }
+      continue;
     }
 
-    // content_block_start with tool_use
-    if (eventType === "content_block_start" && obj.content_block?.type === "tool_use") {
-      return {
-        type: "tool_use",
-        tool: obj.content_block.name || "?",
-        input: "",
-      };
+    // content_block_start with tool_use (streaming event)
+    if (
+      eventType === "content_block_start" &&
+      (parsed.content_block as Record<string, unknown>)?.type === "tool_use"
+    ) {
+      const cb = parsed.content_block as Record<string, unknown>;
+      const toolCallId =
+        (cb.id as string) ||
+        `tool-${messages.length}-${currentParts.length}`;
+      currentParts.push({
+        type: "tool-call" as const,
+        toolCallId,
+        toolName: (cb.name as string) || "unknown",
+        args: {} as Record<string, string | number | boolean | null>,
+      });
+      continue;
     }
-
-    return null;
-  } catch {
-    return { type: "raw", line: raw };
   }
+
+  flushAssistant();
+  return messages;
+}
+
+// ── Thread content components ───────────────────────────────────────
+
+function AssistantMessage() {
+  return (
+    <MessagePrimitive.Root className="flow-run-message">
+      <MessagePrimitive.Content
+        components={{
+          Text: MarkdownText,
+          tools: {
+            Fallback: ToolCallFallback,
+          },
+        }}
+      />
+    </MessagePrimitive.Root>
+  );
+}
+
+function UserMessage() {
+  return (
+    <MessagePrimitive.Root className="flow-run-message flow-run-user">
+      <MessagePrimitive.Content
+        components={{
+          Text: MarkdownText,
+        }}
+      />
+    </MessagePrimitive.Root>
+  );
+}
+
+function MarkdownText() {
+  return (
+    <div className="flow-run-markdown">
+      <MarkdownTextPrimitive />
+    </div>
+  );
+}
+
+function ToolCallFallback(props: ToolCallMessagePartProps) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className="flow-run-tool">
+      <div
+        className="flow-run-tool-header"
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <span className="flow-run-tool-icon">{expanded ? "▼" : "▶"}</span>
+        <span className="flow-run-tool-name">{props.toolName || "Tool Call"}</span>
+      </div>
+      {expanded && (
+        <div className="flow-run-tool-body">
+          <pre>{JSON.stringify(props.args, null, 2)}</pre>
+          {props.result !== undefined && (
+            <div className="flow-run-tool-result">
+              <pre>
+                {typeof props.result === "string"
+                  ? props.result
+                  : JSON.stringify(props.result, null, 2)}
+              </pre>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Main FlowRunChatView with assistant-ui ──────────────────────────
+
+function FlowRunThread({
+  messages,
+  isRunning,
+  flowRun,
+  resultMeta,
+}: {
+  messages: ThreadMessageLike[];
+  isRunning: boolean;
+  flowRun?: FlowRunMeta;
+  resultMeta: { cost: number; turns: number } | null;
+}) {
+  const runtime = useExternalStoreRuntime({
+    isRunning,
+    messages,
+    convertMessage: (msg) => msg,
+    onNew: async () => {
+      // Read-only — no-op
+    },
+  });
+
+  return (
+    <AssistantRuntimeProvider runtime={runtime}>
+      <div className="flow-run-chat">
+        {flowRun && (
+          <div className="flow-run-header">
+            <span className="flow-run-header-label">
+              {flowRun.flow_name} &mdash; {flowRun.node_label}
+            </span>
+            <span className="flow-run-header-run">
+              Run: {flowRun.run_id.slice(0, 8)}
+            </span>
+          </div>
+        )}
+
+        <ThreadPrimitive.Root className="flow-run-thread">
+          <ThreadPrimitive.Viewport className="flow-run-viewport">
+            <ThreadPrimitive.Messages
+              components={{
+                UserMessage,
+                AssistantMessage,
+              }}
+            />
+          </ThreadPrimitive.Viewport>
+        </ThreadPrimitive.Root>
+
+        {isRunning && (
+          <div className="flow-run-busy">
+            <span className="flow-run-busy-dot" />
+            Running...
+          </div>
+        )}
+
+        {!isRunning && resultMeta && (
+          <div className="flow-run-result">
+            <span className="flow-run-result-badge">
+              {resultMeta.turns} turns &middot; ${resultMeta.cost.toFixed(4)}
+            </span>
+          </div>
+        )}
+      </div>
+    </AssistantRuntimeProvider>
+  );
 }
 
 export default function FlowRunChatView({
@@ -104,41 +287,31 @@ export default function FlowRunChatView({
   busy,
   flowRun,
 }: FlowRunChatViewProps) {
-  const [events, setEvents] = useState<ParsedEvent[]>([]);
+  const [rawLines, setRawLines] = useState<RawLine[]>([]);
   const [isLive, setIsLive] = useState(busy);
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const cleanupRef = useRef<(() => void) | null>(null);
 
   const addLine = useCallback((raw: string) => {
-    const parsed = parseLine(raw);
-    if (parsed) {
-      setEvents((prev) => [...prev, parsed]);
-    }
+    const parsed = parseRawLine(raw);
+    setRawLines((prev) => [...prev, parsed]);
   }, []);
 
   useEffect(() => {
-    setEvents([]);
+    setRawLines([]);
     setIsLive(busy);
 
     if (busy) {
-      // Live: use SSE stream (which replays + subscribes)
       const cleanup = streamSessionLog(
         agentId,
         sessionId,
         addLine,
         () => setIsLive(false)
       );
-      cleanupRef.current = cleanup;
       return cleanup;
     } else {
-      // Completed: fetch full log
       (async () => {
         try {
           const lines = await getSessionLog(agentId, sessionId);
-          const parsed = lines
-            .map(parseLine)
-            .filter((e): e is ParsedEvent => e !== null);
-          setEvents(parsed);
+          setRawLines(lines.filter((l) => l.trim()).map(parseRawLine));
         } catch {
           // ignore
         }
@@ -146,126 +319,28 @@ export default function FlowRunChatView({
     }
   }, [agentId, sessionId, busy, addLine]);
 
-  // Auto-scroll
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [events]);
+  const messages = useMemo(() => linesToMessages(rawLines), [rawLines]);
 
-  // Collapse state for tool blocks
-  const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
-  const toggleCollapse = useCallback((idx: number) => {
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(idx)) {
-        next.delete(idx);
-      } else {
-        next.add(idx);
+  // Extract result metadata from the last result event
+  const resultMeta = useMemo(() => {
+    for (let i = rawLines.length - 1; i >= 0; i--) {
+      const p = rawLines[i].parsed;
+      if (p && (p.type as string) === "result") {
+        return {
+          cost: (p.total_cost_usd as number) || 0,
+          turns: (p.num_turns as number) || 0,
+        };
       }
-      return next;
-    });
-  }, []);
+    }
+    return null;
+  }, [rawLines]);
 
   return (
-    <div className="flow-run-chat" ref={scrollRef}>
-      {flowRun && (
-        <div className="flow-run-header">
-          <span className="flow-run-header-label">
-            {flowRun.flow_name} &mdash; {flowRun.node_label}
-          </span>
-          <span className="flow-run-header-run">Run: {flowRun.run_id.slice(0, 8)}</span>
-        </div>
-      )}
-
-      <div className="flow-run-messages">
-        {events.map((evt, i) => {
-          switch (evt.type) {
-            case "system":
-              return null;
-
-            case "assistant_text":
-              return (
-                <div key={i} className="flow-run-message">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {evt.text}
-                  </ReactMarkdown>
-                </div>
-              );
-
-            case "tool_use":
-              return (
-                <div key={i} className="flow-run-tool">
-                  <div
-                    className="flow-run-tool-header"
-                    onClick={() => toggleCollapse(i)}
-                  >
-                    <span className="flow-run-tool-icon">
-                      {collapsed.has(i) ? "▶" : "▼"}
-                    </span>
-                    <span className="flow-run-tool-name">{evt.tool}</span>
-                  </div>
-                  {!collapsed.has(i) && evt.input && (
-                    <div className="flow-run-tool-body">
-                      <pre>{evt.input}</pre>
-                    </div>
-                  )}
-                </div>
-              );
-
-            case "tool_result":
-              return (
-                <div
-                  key={i}
-                  className={`flow-run-tool ${evt.is_error ? "flow-run-tool-error" : ""}`}
-                >
-                  <div
-                    className="flow-run-tool-header"
-                    onClick={() => toggleCollapse(i)}
-                  >
-                    <span className="flow-run-tool-icon">
-                      {collapsed.has(i) ? "▶" : "▼"}
-                    </span>
-                    <span className="flow-run-tool-name">
-                      {evt.is_error ? "Error" : "Result"}
-                    </span>
-                  </div>
-                  {!collapsed.has(i) && (
-                    <div className="flow-run-tool-body">
-                      <pre>{evt.content}</pre>
-                    </div>
-                  )}
-                </div>
-              );
-
-            case "result":
-              return (
-                <div key={i} className="flow-run-result">
-                  <span className="flow-run-result-badge">
-                    {evt.turns} turns &middot; ${evt.cost.toFixed(4)}
-                  </span>
-                </div>
-              );
-
-            case "raw":
-              return (
-                <div key={i} className="flow-run-message">
-                  <pre>{evt.line}</pre>
-                </div>
-              );
-
-            default:
-              return null;
-          }
-        })}
-
-        {isLive && (
-          <div className="flow-run-busy">
-            <span className="flow-run-busy-dot" />
-            Running...
-          </div>
-        )}
-      </div>
-    </div>
+    <FlowRunThread
+      messages={messages}
+      isRunning={isLive}
+      flowRun={flowRun}
+      resultMeta={resultMeta}
+    />
   );
 }

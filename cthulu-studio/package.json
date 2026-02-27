@@ -12,6 +12,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@assistant-ui/react": "^0.12.14",
+    "@assistant-ui/react-markdown": "^0.12.5",
     "@monaco-editor/react": "^4.7.0",
     "@tailwindcss/vite": "^4.2.1",
     "@tauri-apps/plugin-dialog": "^2.6.0",

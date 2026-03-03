@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { STUDIO_ASSISTANT_ID, type FlowSummary, type Flow, type NodeTypeSchema, type AgentSummary, type SavedPrompt, type ActiveView } from "../types/flow";
 import { listAgents, createAgent, deleteAgent, listPrompts, savePrompt, deletePrompt as deletePromptApi, listAgentSessions } from "../api/client";
-import { Switch } from "@/components/ui/switch";
+import { Switch } from "@/components/ui/motion-switch";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import TemplateGallery from "./TemplateGallery";
 
@@ -228,8 +228,10 @@ export default function Sidebar({
                   <Switch
                     checked={flow.enabled}
                     onCheckedChange={() => onToggleEnabled(flow.id)}
-                    onClick={(e) => e.stopPropagation()}
-                    className="data-[state=checked]:bg-[var(--success)]"
+                    onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                    size="md"
+                    aria-label={flow.enabled ? "Disable workflow" : "Enable workflow"}
+                    className="data-[state=checked]:bg-[var(--success)] data-[state=unchecked]:bg-zinc-600 data-[state=unchecked]:border-zinc-500"
                   />
                 </div>
                 <div className="sidebar-item-meta">{flow.node_count} nodes</div>

@@ -2,6 +2,7 @@ pub mod agents;
 pub mod auth;
 pub mod changes;
 pub mod flows;
+pub mod mcp;
 pub mod middleware;
 pub mod prompts;
 mod routes;

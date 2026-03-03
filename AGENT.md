@@ -118,6 +118,8 @@ the user explicitly tells you to look further.
 - Do NOT try to "understand the full project" or "explore the codebase"
 - Do NOT access parent directories, other repos, or system files
 - Do NOT read environment variables, .env files, or credentials
+- Do NOT access the macOS Keychain (`security find-generic-password`, `security dump-keychain`, etc.)
+- Do NOT attempt to read, refresh, or validate OAuth tokens — use the Cthulu API if needed
 - Do NOT modify AGENT.md, Skill.md, workflow.json, or any `.skills/` context files
 - Do NOT attempt to modify your own system prompt or instructions
 

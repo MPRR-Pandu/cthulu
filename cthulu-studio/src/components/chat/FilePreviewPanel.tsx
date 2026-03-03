@@ -218,23 +218,28 @@ const FilePreviewPanel = memo(function FilePreviewPanel({
         {/* Stepper — sticky context bar at top */}
         {steps.length > 0 && (
           <div className="fr-stepper" title={currentStep?.userMessage}>
-            <button
-              className="fr-stepper-btn"
-              disabled={clampedStep <= 0}
-              onClick={() => setActiveStep((s) => Math.max(0, s - 1))}
-            >
-              ‹
-            </button>
-            <span className="fr-stepper-label">
-              Step {clampedStep + 1} of {steps.length}
-            </span>
-            <button
-              className="fr-stepper-btn"
-              disabled={clampedStep >= steps.length - 1}
-              onClick={() => setActiveStep((s) => Math.min(steps.length - 1, s + 1))}
-            >
-              ›
-            </button>
+            <div className="fr-stepper-nav">
+              <button
+                className="fr-stepper-btn"
+                disabled={clampedStep <= 0}
+                onClick={() => setActiveStep((s) => Math.max(0, s - 1))}
+              >
+                ‹
+              </button>
+              <span className="fr-stepper-label">
+                Step {clampedStep + 1} of {steps.length}
+              </span>
+              <button
+                className="fr-stepper-btn"
+                disabled={clampedStep >= steps.length - 1}
+                onClick={() => setActiveStep((s) => Math.min(steps.length - 1, s + 1))}
+              >
+                ›
+              </button>
+            </div>
+            {currentStep?.userMessage && (
+              <div className="fr-stepper-msg">{truncateMsg(currentStep.userMessage, 60)}</div>
+            )}
           </div>
         )}
 
@@ -263,7 +268,6 @@ const FilePreviewPanel = memo(function FilePreviewPanel({
         {/* File list for active step */}
         {stepFileOps.length > 0 && (
           <div className="fr-tree-section fr-tree-section-files">
-            <div className="fr-tree-section-label">Changed files</div>
             {[...groups.entries()].map(([dir, files]) => (
               <div key={dir} className="fr-tree-group">
                 {dir && <div className="fr-tree-dir">{dir}</div>}
@@ -311,62 +315,56 @@ const FilePreviewPanel = memo(function FilePreviewPanel({
           </div>
         )}
 
-        {/* All changes — cumulative git snapshot, always visible regardless of step */}
-        {gitSnapshot && gitSnapshot.repos.some((r) => r.files.length > 0) && (
-          <div className="fr-tree-section fr-tree-section-git">
-            <div className="fr-tree-section-label">All changes</div>
-            {gitSnapshot.repos.map((repo) =>
-              repo.files.map((f) => {
-                const icon = fileIcon(f.path);
-                // Check if this git file matches a tool-call file op (clickable if so)
-                const matchingOp = fileOps.find(
-                  (op) => op.filePath.endsWith(f.path) || f.path.endsWith(op.filePath.replace(/\\/g, "/"))
-                );
-                const isInCurrentStep = matchingOp && stepFileOps.some((s) => s.toolCallId === matchingOp.toolCallId);
-                return matchingOp ? (
-                  <button
-                    key={`${repo.root}/${f.path}`}
-                    className={`fr-tree-file ${matchingOp.toolCallId === activeId ? "fr-tree-file-active" : ""} ${!isInCurrentStep ? "fr-git-other-step" : ""}`}
-                    onClick={() => onSelect(matchingOp.toolCallId)}
-                    title={f.path}
-                  >
-                    <span className="fr-tree-icon" style={{ color: icon.color }}>{icon.icon}</span>
-                    <span className="fr-tree-file-name">{basename(f.path)}</span>
-                    <span className="fr-git-status" style={{ color: gitStatusColor(f.status) }}>{f.status}</span>
-                  </button>
-                ) : (
-                  <div
-                    key={`${repo.root}/${f.path}`}
-                    className="fr-tree-file fr-git-only"
-                    title={f.path}
-                  >
-                    <span className="fr-tree-icon" style={{ color: icon.color }}>{icon.icon}</span>
-                    <span className="fr-tree-file-name">{basename(f.path)}</span>
-                    <span className="fr-git-status" style={{ color: gitStatusColor(f.status) }}>{f.status}</span>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        )}
-
-        {/* Summary footer */}
-        {stepFileOps.length > 0 && (() => {
-          let totalAdded = 0, totalRemoved = 0;
-          for (const op of stepFileOps) {
-            if (op.type === "edit") {
-              const c = editLineCounts(op);
-              totalAdded += c.added;
-              totalRemoved += c.removed;
-            } else if (op.type === "write" && op.content) {
-              totalAdded += op.content.split("\n").length;
-            }
-          }
+        {/* Working tree — cumulative git snapshot, always visible regardless of step */}
+        {gitSnapshot && gitSnapshot.repos.some((r) => r.files.length > 0) && (() => {
+          const totalFiles = gitSnapshot.repos.reduce((n, r) => n + r.files.length, 0);
+          const totalAdded = gitSnapshot.repos.reduce(
+            (n, r) => n + r.files.reduce((a, f) => a + f.additions, 0), 0
+          );
+          const totalDeleted = gitSnapshot.repos.reduce(
+            (n, r) => n + r.files.reduce((a, f) => a + f.deletions, 0), 0
+          );
           return (
-            <div className="fr-tree-summary">
-              {stepFileOps.length} file{stepFileOps.length !== 1 ? "s" : ""} changed
-              {totalAdded > 0 && <span className="fr-file-badge-add"> +{totalAdded}</span>}
-              {totalRemoved > 0 && <span className="fr-file-badge-del"> −{totalRemoved}</span>}
+            <div className="fr-tree-section fr-tree-section-git">
+              <div className="fr-tree-section-label">
+                Working tree
+                <span className="fr-wt-stats">
+                  {totalFiles} file{totalFiles !== 1 ? "s" : ""}
+                  {totalAdded > 0 && <span className="fr-file-badge-add"> +{totalAdded}</span>}
+                  {totalDeleted > 0 && <span className="fr-file-badge-del"> −{totalDeleted}</span>}
+                </span>
+              </div>
+              {gitSnapshot.repos.map((repo) =>
+                repo.files.map((f) => {
+                  const icon = fileIcon(f.path);
+                  const matchingOp = fileOps.find(
+                    (op) => op.filePath.endsWith(f.path) || f.path.endsWith(op.filePath.replace(/\\/g, "/"))
+                  );
+                  const isInCurrentStep = matchingOp && stepFileOps.some((s) => s.toolCallId === matchingOp.toolCallId);
+                  return matchingOp ? (
+                    <button
+                      key={`${repo.root}/${f.path}`}
+                      className={`fr-tree-file ${matchingOp.toolCallId === activeId ? "fr-tree-file-active" : ""} ${!isInCurrentStep ? "fr-git-other-step" : ""}`}
+                      onClick={() => onSelect(matchingOp.toolCallId)}
+                      title={f.path}
+                    >
+                      <span className="fr-tree-icon" style={{ color: icon.color }}>{icon.icon}</span>
+                      <span className="fr-tree-file-name">{basename(f.path)}</span>
+                      <span className="fr-git-status" style={{ color: gitStatusColor(f.status) }}>{f.status}</span>
+                    </button>
+                  ) : (
+                    <div
+                      key={`${repo.root}/${f.path}`}
+                      className="fr-tree-file fr-git-only"
+                      title={f.path}
+                    >
+                      <span className="fr-tree-icon" style={{ color: icon.color }}>{icon.icon}</span>
+                      <span className="fr-tree-file-name">{basename(f.path)}</span>
+                      <span className="fr-git-status" style={{ color: gitStatusColor(f.status) }}>{f.status}</span>
+                    </div>
+                  );
+                })
+              )}
             </div>
           );
         })()}

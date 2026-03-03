@@ -53,9 +53,8 @@ pub struct SearchClient {
     /// None means skip SearXNG and go straight to DDG fallback.
     searxng_url: Option<String>,
 
-    /// Rate limiters only engage on the DDG fallback path.
+    /// Rate limiter only engages on the DDG fallback search path.
     rl_search: RateLimiter,
-    rl_fetch: RateLimiter,
 
     http: reqwest::Client,
 }
@@ -65,7 +64,6 @@ impl SearchClient {
         Self {
             searxng_url,
             rl_search: RateLimiter::new(30),
-            rl_fetch: RateLimiter::new(20),
             http: reqwest::Client::builder()
                 .user_agent(DDG_USER_AGENT)
                 .timeout(std::time::Duration::from_secs(30))
@@ -104,10 +102,8 @@ impl SearchClient {
     /// Fetch and parse text content from any URL.
     /// Strips scripts, styles, nav, header, footer — returns clean readable text.
     /// Truncates at 8 000 chars (same as Python implementation).
+    /// No rate limit — this fetches arbitrary target pages, not a search engine.
     pub async fn fetch_content(&self, url: &str) -> Result<String> {
-        // Content fetching from arbitrary URLs — rate-limit the DDG path only.
-        // For non-DDG URLs we still apply the fetch limiter conservatively.
-        self.rl_fetch.acquire().await;
         self.fetch_and_parse(url).await
     }
 
@@ -297,9 +293,16 @@ impl SearchClient {
             .collect::<Vec<_>>()
             .join(" ");
 
-        // Truncate at 8 000 chars (same as Python)
+        // Truncate at ~8 000 chars (same as Python).
+        // Use char_indices to find a safe UTF-8 boundary — slicing at an
+        // arbitrary byte offset panics if it lands inside a multi-byte char.
         let text = if text.len() > 8000 {
-            format!("{}... [content truncated]", &text[..8000])
+            let end = text[..8000]
+                .char_indices()
+                .last()
+                .map(|(i, c)| i + c.len_utf8())
+                .unwrap_or(8000);
+            format!("{}... [content truncated]", &text[..end])
         } else {
             text
         };

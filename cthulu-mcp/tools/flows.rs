@@ -234,7 +234,7 @@ fn render_flow_description(v: &Value) -> String {
                 let candidates = &[
                     std::path::PathBuf::from(prompt_str),
                     dirs::home_dir().unwrap_or_default().join(".cthulu").join(prompt_str),
-                    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(prompt_str),
+                    std::env::current_dir().unwrap_or_default().join(prompt_str),
                 ];
                 for path in candidates {
                     if let Ok(text) = std::fs::read_to_string(path) {

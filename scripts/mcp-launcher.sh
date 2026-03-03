@@ -44,6 +44,11 @@ if ! backend_running; then
         source "$PROJECT_DIR/.env"
         set +a
     fi
+    # NOTE: The backend process is intentionally orphaned — it keeps running
+    # after the MCP server exits (e.g. when Claude Desktop kills this process).
+    # This is by design: the backend is a shared service that other tools
+    # (Studio, curl, etc.) also depend on. Users who want to stop it can
+    # kill it manually: kill $(lsof -ti:8081)
     "$BACKEND_BINARY" serve >>"$BACKEND_LOG" 2>&1 &
     BACKEND_PID=$!
     echo "[mcp-launcher] Backend started (pid $BACKEND_PID)" >&2

@@ -222,9 +222,11 @@ impl CthuluClient {
         message: &str,
     ) -> Result<String> {
         // POST the message — this starts the Claude process.
-        // The endpoint returns SSE; we fire it and then poll status.
+        // The endpoint returns an SSE stream. We must keep the connection alive
+        // (consume the stream in a background task) so the backend doesn't detect
+        // a client disconnect and cancel the Claude process.
         let chat_url = self.url(&format!("/api/agents/{agent_id}/chat"));
-        let _resp = self
+        let resp = self
             .http
             .post(&chat_url)
             .json(&serde_json::json!({
@@ -234,7 +236,13 @@ impl CthuluClient {
             .send()
             .await
             .with_context(|| "POST agent chat")?;
-        // We don't consume the SSE stream — we poll status instead.
+
+        // Drain the SSE stream in the background to keep the connection open.
+        // We don't need the events — we poll status separately — but dropping
+        // the response would close the connection and may abort the backend task.
+        tokio::spawn(async move {
+            let _ = resp.bytes().await;
+        });
 
         // Poll status every 500 ms for up to 120 s
         let deadline = std::time::Instant::now() + Duration::from_secs(120);

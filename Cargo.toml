@@ -2,10 +2,15 @@
 name = "cthulu"
 version = "0.1.0"
 edition = "2024"
+default-run = "cthulu"
 
 [[bin]]
 name = "cthulu"
 path = "cthulu-backend/main.rs"
+
+[[bin]]
+name = "cthulu-mcp"
+path = "cthulu-mcp/main.rs"
 
 [profile.release]
 opt-level = 3
@@ -47,6 +52,11 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter", "fmt", "json", "time", "local-time"] }
 sentry = { version = "0.46.2", features = ["tower-axum-matched-path", "tracing", "logs"] }
 tracing-tree = "0.4.1"
+
+# MCP server
+rmcp = { version = "0.17.0", features = ["server", "transport-io", "macros", "schemars"] }
+schemars = "1.0"
+urlencoding = "2.1"
 
 [dev-dependencies]
 tempfile = "3.26.0"

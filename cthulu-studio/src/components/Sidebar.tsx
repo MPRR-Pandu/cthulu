@@ -1,11 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
-import { STUDIO_ASSISTANT_ID, type FlowSummary, type Flow, type NodeTypeSchema, type AgentSummary, type SavedPrompt } from "../types/flow";
+import { STUDIO_ASSISTANT_ID, type FlowSummary, type Flow, type NodeTypeSchema, type AgentSummary, type SavedPrompt, type ActiveView } from "../types/flow";
 import { listAgents, createAgent, deleteAgent, listPrompts, savePrompt, deletePrompt as deletePromptApi, listAgentSessions } from "../api/client";
 import { Switch } from "@/components/ui/switch";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import TemplateGallery from "./TemplateGallery";
-
-type ActiveView = "flow-editor" | "agent-grid" | "agent-workspace" | "prompt-editor";
 
 interface SidebarProps {
   // Flow list
@@ -30,6 +28,7 @@ interface SidebarProps {
   nodeTypes: NodeTypeSchema[];
   onGrab: (nodeType: NodeTypeSchema) => void;
   onCollapse: () => void;
+  onShowMcp: () => void;
 }
 
 const typeColors: Record<string, string> = {
@@ -58,6 +57,7 @@ export default function Sidebar({
   nodeTypes,
   onGrab,
   onCollapse,
+  onShowMcp,
 }: SidebarProps) {
   const [showGallery, setShowGallery] = useState(false);
   const [agents, setAgents] = useState<AgentSummary[]>([]);
@@ -365,6 +365,18 @@ export default function Sidebar({
           </div>
         </CollapsibleContent>
       </Collapsible>
+
+      {/* MCP section */}
+      <div className="sidebar-section sidebar-mcp-section">
+        <div
+          className={`sidebar-mcp-item${activeView === "mcp-setup" ? " active" : ""}`}
+          onClick={onShowMcp}
+          title="Set up cthulu-mcp for Claude Desktop"
+        >
+          <span className="sidebar-mcp-icon">⬡</span>
+          <span className="sidebar-mcp-label">MCP Setup</span>
+        </div>
+      </div>
 
       {/* Node palette — only visible in flow editor with an active flow */}
       {activeView === "flow-editor" && activeFlowId && (

@@ -2,6 +2,8 @@ export const STUDIO_ASSISTANT_ID = "studio-assistant";
 
 export type NodeType = "trigger" | "source" | "executor" | "sink";
 
+export type ActiveView = "flow-editor" | "agent-grid" | "agent-workspace" | "prompt-editor" | "mcp-setup";
+
 export interface Position {
   x: number;
   y: number;

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import * as api from "./api/client";
 import { log } from "./api/logger";
 import { subscribeToRuns } from "./api/runStream";
-import type { Flow, FlowNode, FlowEdge, FlowSummary, NodeTypeSchema, RunEvent } from "./types/flow";
+import type { Flow, FlowNode, FlowEdge, FlowSummary, NodeTypeSchema, RunEvent, ActiveView } from "./types/flow";
 import TopBar from "./components/TopBar";
 import Sidebar from "./components/Sidebar";
 import FlowWorkspaceView from "./components/FlowWorkspaceView";
@@ -10,6 +10,7 @@ import AgentGridView from "./components/AgentGridView";
 import AgentDetailView from "./components/AgentDetailView";
 import PromptEditorView from "./components/PromptEditorView";
 import { type CanvasHandle } from "./components/Canvas";
+import McpSetupView from "./components/McpSetupView";
 import {
   Dialog,
   DialogContent,
@@ -19,8 +20,6 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { useFlowDispatch } from "./hooks/useFlowDispatch";
-
-type ActiveView = "flow-editor" | "agent-grid" | "agent-workspace" | "prompt-editor";
 
 export default function App() {
   const [flows, setFlows] = useState<FlowSummary[]>([]);
@@ -241,6 +240,10 @@ export default function App() {
     setActiveView("prompt-editor");
   };
 
+  const handleShowMcp = () => {
+    setActiveView("mcp-setup");
+  };
+
   const createFlow = async () => {
     try {
       const { id } = await api.createFlow("New Flow");
@@ -362,6 +365,7 @@ export default function App() {
             nodeTypes={nodeTypes}
             onGrab={handleGrab}
             onCollapse={() => setSidebarCollapsed(true)}
+            onShowMcp={handleShowMcp}
           />
         )}
 
@@ -409,6 +413,9 @@ export default function App() {
               setPromptListKey((k) => k + 1);
             }}
           />
+        )}
+        {activeView === "mcp-setup" && (
+          <McpSetupView />
         )}
         {[...visitedAgents.entries()].map(([agentId, agentName]) => (
           <div

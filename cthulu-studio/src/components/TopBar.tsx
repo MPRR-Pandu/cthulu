@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/select";
 import { useTheme } from "@/lib/ThemeContext";
 import { themes } from "@/lib/themes";
+import type { ActiveView } from "../types/flow";
 
 function formatRelativeTime(iso: string): string {
   const now = Date.now();
@@ -29,8 +30,6 @@ function formatRelativeTime(iso: string): string {
   const diffDays = Math.floor(diffHr / 24);
   return `${diffDays}d ${diffHr % 24}h`;
 }
-
-type ActiveView = "flow-editor" | "agent-grid" | "agent-workspace" | "prompt-editor";
 
 interface TopBarProps {
   activeView: ActiveView;
@@ -166,6 +165,15 @@ export default function TopBar({
             ← Back
           </Button>
           <span className="top-bar-agent-name">Prompt Editor</span>
+        </>
+      )}
+
+      {activeView === "mcp-setup" && (
+        <>
+          <Button variant="ghost" size="sm" className="top-bar-back" onClick={onBackToFlow}>
+            ← Back
+          </Button>
+          <span className="top-bar-agent-name">MCP Setup</span>
         </>
       )}
 

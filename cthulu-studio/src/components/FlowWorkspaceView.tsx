@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect, type RefObject } from "react";
 import { STUDIO_ASSISTANT_ID, type Flow, type FlowNode, type FlowEdge, type RunEvent } from "../types/flow";
-import { listAgentSessions, newAgentSession } from "../api/client";
+import { listAgentSessions, newAgentSession, updateAgent } from "../api/client";
 import type { UpdateSignal } from "../hooks/useFlowDispatch";
 import Canvas, { type CanvasHandle } from "./Canvas";
 import FlowEditor, { type FlowEditorHandle } from "./FlowEditor";
@@ -8,6 +8,45 @@ import RunLog from "./RunLog";
 import AgentChatView from "./AgentChatView";
 import NodeConfigPanel from "./NodeConfigPanel";
 import ErrorBoundary from "./ErrorBoundary";
+
+/**
+ * Condensed workflow-builder skill injected into the studio-assistant's system prompt.
+ * Teaches the agent to output structured JSON code blocks the Studio can parse.
+ */
+const WORKFLOW_SKILL_PROMPT = `You can help users build workflow pipelines. When asked to create a workflow, follow this protocol:
+
+1. Ask for a workflow NAME if not provided.
+2. Clarify sources, schedule, and destinations.
+3. Show a text PREVIEW of the pipeline.
+4. Ask "Shall I create this workflow?" — NEVER create without confirmation.
+5. On confirmation, output a JSON code block with the flow definition.
+
+OUTPUT FORMAT — use a fenced json code block:
+\`\`\`json
+{
+  "action": "create_flow",
+  "name": "kebab-case-name",
+  "description": "What this workflow does",
+  "nodes": [
+    { "node_type": "trigger", "kind": "cron", "label": "Every 4h", "config": { "schedule": "0 */4 * * *" } },
+    { "node_type": "source", "kind": "rss", "label": "RSS: Example", "config": { "url": "https://example.com/feed", "limit": 20 } },
+    { "node_type": "executor", "kind": "claude-code", "label": "Summarizer", "config": { "prompt": "Summarize:\\n\\n{{content}}" } },
+    { "node_type": "sink", "kind": "slack", "label": "Post to Slack", "config": { "channel": "#general" } }
+  ],
+  "edges": "auto"
+}
+\`\`\`
+
+NODE TYPES:
+- trigger: cron (schedule), github-pr (repo), webhook, manual
+- source: rss (url, limit?, keywords?), web-scrape (url), web-scraper (url, items_selector, title_selector, url_selector), github-merged-prs (repos, since_days?), market-data (no config), google-sheets (spreadsheet_id, range, service_account_key_env)
+- filter: keyword (keywords, mode?, field?)
+- executor: claude-code (prompt REQUIRED, permissions?, working_dir?), vm-sandbox (working_dir?)
+- sink: slack (webhook_url_env?, bot_token_env?, channel?), notion (token_env, database_id)
+
+EDGE WIRING: trigger→source, source→executor (or source→filter→executor), executor→sink. "edges": "auto" handles this.
+
+PROMPT VARIABLES: {{content}}, {{item_count}}, {{timestamp}}, {{market_data}}, {{diff}}, {{pr_number}}, {{pr_title}}, {{repo}}`;
 
 interface FlowWorkspaceViewProps {
   flowId: string | null;
@@ -70,6 +109,16 @@ export default function FlowWorkspaceView({
   if (updateSignal.source === "init" && updateSignal.counter > 0) {
     editorDefaultText.current = initialEditorText;
   }
+
+  // Ensure the studio-assistant agent has the workflow-builder skill prompt
+  const skillInjectedRef = useRef(false);
+  useEffect(() => {
+    if (skillInjectedRef.current) return;
+    skillInjectedRef.current = true;
+    updateAgent(STUDIO_ASSISTANT_ID, {
+      append_system_prompt: WORKFLOW_SKILL_PROMPT,
+    }).catch(() => { /* agent may not exist yet */ });
+  }, []);
 
   // Auto-resolve or create a session for the Studio Assistant terminal
   useEffect(() => {

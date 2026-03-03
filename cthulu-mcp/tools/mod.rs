@@ -198,13 +198,31 @@ impl CthuluMcpServer {
     }
 
     #[tool(description = "\
-        Create a new Cthulu flow. Supply a JSON object with at minimum a 'name' field. \
-        Optionally include 'description', 'enabled', 'nodes' array, and 'edges' array. \
-        Use get_node_types to see valid node_type values and their config schemas. \
-        Example minimal body: {\"name\": \"My Flow\"}. \
-        Example with a cron trigger: {\"name\": \"Daily Brief\", \"nodes\": [{\"id\": \"t1\", \
-        \"node_type\": \"trigger\", \"kind\": \"cron\", \"config\": {\"schedule\": \"0 9 * * 1-5\"}, \
-        \"position\": {\"x\": 0, \"y\": 0}, \"label\": \"Weekday 9am\"}], \"edges\": []}")]
+Create a new Cthulu flow. The body is a JSON string with:\n\
+  - name (required): flow name\n\
+  - description (optional): what the flow does\n\
+  - nodes (array): each node needs {id, node_type, kind, config, position: {x,y}, label}\n\
+  - edges (array): each edge needs {id, source, target} where source/target are node IDs\n\
+\n\
+IMPORTANT: Call get_node_types FIRST to get valid node_type/kind/config combinations.\n\
+Call validate_cron to verify cron expressions before using them.\n\
+IMPORTANT: Executor nodes MUST include 'agent_id' in config. Call list_agents to find one.\n\
+\n\
+Node types: trigger, source, executor, sink (all lowercase).\n\
+Pipeline: trigger -> source(s) -> executor -> sink(s). Edges define the connections.\n\
+Position x increases left-to-right (0, 300, 600, 900). Use y offsets for parallel nodes.\n\
+\n\
+Complete example — RSS feed to Slack via Claude:\n\
+{\"name\": \"Tech News Brief\", \"description\": \"Daily tech news summary to Slack\", \"nodes\": [\n\
+  {\"id\": \"t1\", \"node_type\": \"trigger\", \"kind\": \"cron\", \"config\": {\"schedule\": \"0 9 * * 1-5\"}, \"position\": {\"x\": 0, \"y\": 0}, \"label\": \"Weekday 9am\"},\n\
+  {\"id\": \"s1\", \"node_type\": \"source\", \"kind\": \"rss\", \"config\": {\"url\": \"https://news.ycombinator.com/rss\", \"limit\": 15}, \"position\": {\"x\": 300, \"y\": 0}, \"label\": \"HN RSS\"},\n\
+  {\"id\": \"e1\", \"node_type\": \"executor\", \"kind\": \"claude-code\", \"config\": {\"agent_id\": \"mc-content\", \"prompt\": \"Summarize the top {{item_count}} tech news items into a brief Slack post with bullet points. Content:\\n{{content}}\"}, \"position\": {\"x\": 600, \"y\": 0}, \"label\": \"Summarizer\"},\n\
+  {\"id\": \"k1\", \"node_type\": \"sink\", \"kind\": \"slack\", \"config\": {\"webhook_url_env\": \"SLACK_WEBHOOK_URL\"}, \"position\": {\"x\": 900, \"y\": 0}, \"label\": \"Slack\"}\n\
+], \"edges\": [\n\
+  {\"id\": \"e-t1-s1\", \"source\": \"t1\", \"target\": \"s1\"},\n\
+  {\"id\": \"e-s1-e1\", \"source\": \"s1\", \"target\": \"e1\"},\n\
+  {\"id\": \"e-e1-k1\", \"source\": \"e1\", \"target\": \"k1\"}\n\
+]}")]
     async fn create_flow(
         &self,
         Parameters(p): Parameters<BodyParam>,
@@ -213,12 +231,16 @@ impl CthuluMcpServer {
     }
 
     #[tool(description = "\
-        Update an existing flow by ID. \
-        Supply the full or partial flow JSON. \
-        Include 'version' (the current version integer from get_flow) to avoid overwrite conflicts. \
-        To enable/disable: {\"enabled\": true}. \
-        To rename: {\"name\": \"New Name\"}. \
-        To swap a node's cron schedule: fetch the flow, modify nodes[i].config.schedule, send back.")]
+Update an existing flow by ID. Supply partial or full JSON.\n\
+MUST include 'version' (integer from get_flow) to prevent overwrite conflicts.\n\
+\n\
+Common updates:\n\
+  Enable/disable: {\"enabled\": false, \"version\": 3}\n\
+  Rename: {\"name\": \"New Name\", \"version\": 3}\n\
+  Change schedule: get_flow first, then send back modified nodes array with version.\n\
+  Add a node: get_flow, append to nodes array, add edges, send full nodes+edges+version.\n\
+\n\
+To modify nodes or edges, always send the COMPLETE nodes and edges arrays (not just the changed node).")]
     async fn update_flow(
         &self,
         Parameters(p): Parameters<IdBodyParam>,
@@ -477,28 +499,82 @@ Flows are stored as JSON files at ~/.cthulu/flows/<uuid>.json. \
 Each flow is a DAG: trigger -> sources -> (filters) -> executor -> sinks.\n\
 The backend REST API runs at http://localhost:8081.\n\
 \n\
-## Recommended workflow for creating a flow\n\
-1. Call get_node_types  -- learn the schema (node kinds, config fields, prompt variables)\n\
-2. Call validate_cron   -- verify any cron expression before embedding it\n\
-3. Call list_flows      -- check for duplicates\n\
-4. Call create_flow     -- supply full nodes + edges JSON\n\
-5. Call describe_flow   -- confirm the DAG looks right\n\
+## IMPORTANT: Interactive workflow creation (ALWAYS follow this pattern)\n\
 \n\
-## Node types (summary — call get_node_types for full schema)\n\
+When the user asks to create a workflow, NEVER call create_flow immediately.\n\
+Instead, follow this conversational pattern:\n\
+\n\
+Step 1: Ask the user for a workflow NAME if they didn't provide one.\n\
+Step 2: Ask clarifying questions about sources, schedule, and destinations.\n\
+Step 3: Call get_node_types to learn valid node_type/kind/config fields.\n\
+Step 4: If using cron, call validate_cron to verify the expression.\n\
+Step 5: Call list_agents to find an available agent_id for the executor.\n\
+Step 6: Show the user a PREVIEW of the workflow you will create:\n\
+        - Name, description\n\
+        - Pipeline: trigger -> source -> executor -> sink\n\
+        - Key config (schedule, URLs, prompt summary)\n\
+Step 7: Ask the user: 'Shall I proceed and create this workflow, or would you like changes?'\n\
+Step 8: If the user says REJECT/NO/CANCEL -> Do NOT create. Say 'Workflow creation cancelled.'\n\
+        If the user says PROCEED/YES/CREATE -> Call create_flow with the full JSON.\n\
+Step 9: After creation, call describe_flow to verify the DAG.\n\
+Step 10: Ask: 'Would you like to trigger a test run now, or leave it on schedule?'\n\
+        If BUILD/EXECUTE/TEST/YES -> Call trigger_flow to run it immediately.\n\
+        If NO/SKIP -> Done, workflow is saved and scheduled.\n\
+\n\
+CRITICAL: The executor node MUST include 'agent_id' in its config.\n\
+Call list_agents to find available agents. Use a content/writing agent for\n\
+summarization tasks. Without agent_id the executor will fail at runtime.\n\
+\n\
+## Edge wiring rules\n\
+\n\
+Edges connect nodes in a DAG. The pattern is always:\n\
+  trigger -> source(s) -> [filter(s)] -> executor -> sink(s)\n\
+\n\
+- trigger -> each source (1 edge per source)\n\
+- each source -> executor (or source -> filter -> executor)\n\
+- executor -> each sink (1 edge per sink)\n\
+- Edge IDs must be unique strings (e.g. 'e-t1-s1', 'e-s1-e1')\n\
+- Multiple sources are OK (they run in parallel, results merge)\n\
+- Multiple sinks are OK (they all receive the same executor output)\n\
+\n\
+## Node structure\n\
+\n\
+Every node needs: {id, node_type, kind, config, position: {x, y}, label}\n\
+- id: unique string (e.g. 't1', 's1', 'e1', 'k1')\n\
+- node_type: trigger | source | executor | sink (LOWERCASE)\n\
+- kind: the variant (e.g. 'cron', 'rss', 'claude-code', 'slack')\n\
+- config: kind-specific settings (call get_node_types for fields)\n\
+- position: {x, y} for visual layout — x increases L-to-R (0, 300, 600, 900)\n\
+- label: human-readable name shown in the UI\n\
+\n\
+## Prompt template variables (use in executor prompts)\n\
+\n\
+{{content}} — formatted source items (title, url, summary)\n\
+{{item_count}} — number of items after filtering\n\
+{{timestamp}} — current UTC time\n\
+{{market_data}} — crypto/market snapshot (only if market-data source connected)\n\
+{{diff}}, {{pr_number}}, {{pr_title}}, {{repo}} — GitHub PR context\n\
+\n\
+## Node kinds quick reference\n\
+\n\
 trigger  : cron | github-pr | webhook | manual\n\
 source   : rss | web-scrape | web-scraper | github-merged-prs | market-data | google-sheets\n\
 filter   : keyword\n\
 executor : claude-code | vm-sandbox\n\
 sink     : slack | notion\n\
 \n\
-## Key rules\n\
-- node_type values MUST be lowercase (trigger, source, executor, sink)\n\
-- Every node needs: id, node_type, kind, config, position {x,y}, label\n\
-- Executor prompt can be inline text or a relative path like 'examples/prompts/brief.md'\n\
-- Prompt template variables: {{content}}, {{item_count}}, {{timestamp}}, {{market_data}}\n\
-- update_flow requires 'version' (the integer from get_flow) to avoid overwrite conflicts\n\
+## Common configs\n\
+\n\
+cron trigger: {\"schedule\": \"0 9 * * 1-5\"}\n\
+rss source: {\"url\": \"https://...\", \"limit\": 10}\n\
+web-scrape source: {\"url\": \"https://...\"}\n\
+keyword filter: {\"keywords\": [\"word1\", \"word2\"], \"require_all\": false}\n\
+claude-code executor: {\"agent_id\": \"<from list_agents>\", \"prompt\": \"Summarize {{content}} into a brief\"}\n\
+slack sink: {\"webhook_url_env\": \"SLACK_WEBHOOK_URL\"}\n\
+notion sink: {\"token_env\": \"NOTION_TOKEN\", \"database_id\": \"uuid\"}\n\
 \n\
 ## Tools by category\n\
+\n\
 Flows   : list_flows, get_flow, describe_flow, create_flow, update_flow,\n\
           delete_flow, trigger_flow, get_flow_runs, get_flow_schedule, list_workflow_files\n\
 Agents  : list_agents, get_agent, create_agent, update_agent, delete_agent,\n\

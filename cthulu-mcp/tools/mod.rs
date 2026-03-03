@@ -206,6 +206,7 @@ Create a new Cthulu flow. The body is a JSON string with:\n\
 \n\
 IMPORTANT: Call get_node_types FIRST to get valid node_type/kind/config combinations.\n\
 Call validate_cron to verify cron expressions before using them.\n\
+IMPORTANT: Executor nodes MUST include 'agent_id' in config. Call list_agents to find one.\n\
 \n\
 Node types: trigger, source, executor, sink (all lowercase).\n\
 Pipeline: trigger -> source(s) -> executor -> sink(s). Edges define the connections.\n\
@@ -215,7 +216,7 @@ Complete example — RSS feed to Slack via Claude:\n\
 {\"name\": \"Tech News Brief\", \"description\": \"Daily tech news summary to Slack\", \"nodes\": [\n\
   {\"id\": \"t1\", \"node_type\": \"trigger\", \"kind\": \"cron\", \"config\": {\"schedule\": \"0 9 * * 1-5\"}, \"position\": {\"x\": 0, \"y\": 0}, \"label\": \"Weekday 9am\"},\n\
   {\"id\": \"s1\", \"node_type\": \"source\", \"kind\": \"rss\", \"config\": {\"url\": \"https://news.ycombinator.com/rss\", \"limit\": 15}, \"position\": {\"x\": 300, \"y\": 0}, \"label\": \"HN RSS\"},\n\
-  {\"id\": \"e1\", \"node_type\": \"executor\", \"kind\": \"claude-code\", \"config\": {\"prompt\": \"Summarize the top {{item_count}} tech news items into a brief Slack post with bullet points. Content:\\n{{content}}\"}, \"position\": {\"x\": 600, \"y\": 0}, \"label\": \"Summarizer\"},\n\
+  {\"id\": \"e1\", \"node_type\": \"executor\", \"kind\": \"claude-code\", \"config\": {\"agent_id\": \"mc-content\", \"prompt\": \"Summarize the top {{item_count}} tech news items into a brief Slack post with bullet points. Content:\\n{{content}}\"}, \"position\": {\"x\": 600, \"y\": 0}, \"label\": \"Summarizer\"},\n\
   {\"id\": \"k1\", \"node_type\": \"sink\", \"kind\": \"slack\", \"config\": {\"webhook_url_env\": \"SLACK_WEBHOOK_URL\"}, \"position\": {\"x\": 900, \"y\": 0}, \"label\": \"Slack\"}\n\
 ], \"edges\": [\n\
   {\"id\": \"e-t1-s1\", \"source\": \"t1\", \"target\": \"s1\"},\n\
@@ -498,14 +499,31 @@ Flows are stored as JSON files at ~/.cthulu/flows/<uuid>.json. \
 Each flow is a DAG: trigger -> sources -> (filters) -> executor -> sinks.\n\
 The backend REST API runs at http://localhost:8081.\n\
 \n\
-## How to create a workflow from scratch\n\
+## IMPORTANT: Interactive workflow creation (ALWAYS follow this pattern)\n\
 \n\
-Step 1: Call get_node_types to learn valid node_type/kind/config fields.\n\
-Step 2: If using cron, call validate_cron to verify the expression.\n\
-Step 3: Call list_flows to check for name conflicts.\n\
-Step 4: Call create_flow with the full JSON (nodes + edges).\n\
-Step 5: Call describe_flow to verify the DAG is correct.\n\
-Step 6: Call trigger_flow to test-run it immediately.\n\
+When the user asks to create a workflow, NEVER call create_flow immediately.\n\
+Instead, follow this conversational pattern:\n\
+\n\
+Step 1: Ask the user for a workflow NAME if they didn't provide one.\n\
+Step 2: Ask clarifying questions about sources, schedule, and destinations.\n\
+Step 3: Call get_node_types to learn valid node_type/kind/config fields.\n\
+Step 4: If using cron, call validate_cron to verify the expression.\n\
+Step 5: Call list_agents to find an available agent_id for the executor.\n\
+Step 6: Show the user a PREVIEW of the workflow you will create:\n\
+        - Name, description\n\
+        - Pipeline: trigger -> source -> executor -> sink\n\
+        - Key config (schedule, URLs, prompt summary)\n\
+Step 7: Ask the user: 'Shall I proceed and create this workflow, or would you like changes?'\n\
+Step 8: If the user says REJECT/NO/CANCEL -> Do NOT create. Say 'Workflow creation cancelled.'\n\
+        If the user says PROCEED/YES/CREATE -> Call create_flow with the full JSON.\n\
+Step 9: After creation, call describe_flow to verify the DAG.\n\
+Step 10: Ask: 'Would you like to trigger a test run now, or leave it on schedule?'\n\
+        If BUILD/EXECUTE/TEST/YES -> Call trigger_flow to run it immediately.\n\
+        If NO/SKIP -> Done, workflow is saved and scheduled.\n\
+\n\
+CRITICAL: The executor node MUST include 'agent_id' in its config.\n\
+Call list_agents to find available agents. Use a content/writing agent for\n\
+summarization tasks. Without agent_id the executor will fail at runtime.\n\
 \n\
 ## Edge wiring rules\n\
 \n\
@@ -551,7 +569,7 @@ cron trigger: {\"schedule\": \"0 9 * * 1-5\"}\n\
 rss source: {\"url\": \"https://...\", \"limit\": 10}\n\
 web-scrape source: {\"url\": \"https://...\"}\n\
 keyword filter: {\"keywords\": [\"word1\", \"word2\"], \"require_all\": false}\n\
-claude-code executor: {\"prompt\": \"Summarize {{content}} into a brief\"}\n\
+claude-code executor: {\"agent_id\": \"<from list_agents>\", \"prompt\": \"Summarize {{content}} into a brief\"}\n\
 slack sink: {\"webhook_url_env\": \"SLACK_WEBHOOK_URL\"}\n\
 notion sink: {\"token_env\": \"NOTION_TOKEN\", \"database_id\": \"uuid\"}\n\
 \n\

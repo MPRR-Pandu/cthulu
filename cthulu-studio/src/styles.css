@@ -2728,6 +2728,22 @@ button:disabled {
   background: transparent;
 }
 
+/* Files from a different step (clickable but dimmer) */
+.fr-git-other-step {
+  opacity: 0.6;
+}
+
+.fr-git-other-step:hover {
+  opacity: 0.85;
+}
+
+/* All changes section separator */
+.fr-tree-section-git {
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+  padding-top: 2px;
+}
+
 /* Markdown preview for plans */
 .fr-preview-markdown {
   padding: 16px 20px;

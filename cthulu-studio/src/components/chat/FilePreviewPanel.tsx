@@ -3,7 +3,7 @@ import ShikiHighlighter from "react-shiki";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useTheme } from "../../lib/ThemeContext";
-import type { FileOp, PlanOp, MultiRepoSnapshot, GitFileStatus } from "./FilePreviewContext";
+import type { FileOp, PlanOp, MultiRepoSnapshot } from "./FilePreviewContext";
 import type { TaskStep } from "./chatUtils";
 import { groupFileOpsByTask } from "./chatUtils";
 import { computeDiffLines } from "../../utils/diff";
@@ -173,32 +173,6 @@ const FilePreviewPanel = memo(function FilePreviewPanel({
     return oneLine.length > max ? oneLine.slice(0, max) + "…" : oneLine;
   };
 
-  // Build a set of file paths touched by tool calls (for identifying git-only files)
-  const toolCallPaths = useMemo(() => {
-    const paths = new Set<string>();
-    for (const f of fileOps) paths.add(f.filePath);
-    return paths;
-  }, [fileOps]);
-
-  // Git files not in tool calls (modified by bash commands, etc.)
-  const gitOnlyFiles = useMemo(() => {
-    if (!gitSnapshot) return [];
-    const result: { repo: string; file: GitFileStatus }[] = [];
-    for (const repo of gitSnapshot.repos) {
-      for (const f of repo.files) {
-        // Check if any tool call path ends with this git file path
-        const fullPath = repo.root ? `${repo.root}/${f.path}` : f.path;
-        const matched = [...toolCallPaths].some(
-          (p) => p.endsWith(f.path) || p.endsWith(fullPath)
-        );
-        if (!matched) {
-          result.push({ repo: repo.root, file: f });
-        }
-      }
-    }
-    return result;
-  }, [gitSnapshot, toolCallPaths]);
-
   // Git status lookup: path suffix → status char
   const gitStatusMap = useMemo(() => {
     if (!gitSnapshot) return new Map<string, string>();
@@ -337,25 +311,42 @@ const FilePreviewPanel = memo(function FilePreviewPanel({
           </div>
         )}
 
-        {/* Git-only files (changed but not via tool calls) */}
-        {gitOnlyFiles.length > 0 && (
-          <div className="fr-tree-section">
-            <div className="fr-tree-section-label">Other changes</div>
-            {gitOnlyFiles.map((g) => {
-              const icon = fileIcon(g.file.path);
-              return (
-                <div
-                  key={`${g.repo}/${g.file.path}`}
-                  className="fr-tree-file fr-git-only"
-                >
-                  <span className="fr-tree-icon" style={{ color: icon.color }}>{icon.icon}</span>
-                  {basename(g.file.path)}
-                  <span className="fr-git-status" style={{ color: gitStatusColor(g.file.status) }}>
-                    {g.file.status}
-                  </span>
-                </div>
-              );
-            })}
+        {/* All changes — cumulative git snapshot, always visible regardless of step */}
+        {gitSnapshot && gitSnapshot.repos.some((r) => r.files.length > 0) && (
+          <div className="fr-tree-section fr-tree-section-git">
+            <div className="fr-tree-section-label">All changes</div>
+            {gitSnapshot.repos.map((repo) =>
+              repo.files.map((f) => {
+                const icon = fileIcon(f.path);
+                // Check if this git file matches a tool-call file op (clickable if so)
+                const matchingOp = fileOps.find(
+                  (op) => op.filePath.endsWith(f.path) || f.path.endsWith(op.filePath.replace(/\\/g, "/"))
+                );
+                const isInCurrentStep = matchingOp && stepFileOps.some((s) => s.toolCallId === matchingOp.toolCallId);
+                return matchingOp ? (
+                  <button
+                    key={`${repo.root}/${f.path}`}
+                    className={`fr-tree-file ${matchingOp.toolCallId === activeId ? "fr-tree-file-active" : ""} ${!isInCurrentStep ? "fr-git-other-step" : ""}`}
+                    onClick={() => onSelect(matchingOp.toolCallId)}
+                    title={f.path}
+                  >
+                    <span className="fr-tree-icon" style={{ color: icon.color }}>{icon.icon}</span>
+                    <span className="fr-tree-file-name">{basename(f.path)}</span>
+                    <span className="fr-git-status" style={{ color: gitStatusColor(f.status) }}>{f.status}</span>
+                  </button>
+                ) : (
+                  <div
+                    key={`${repo.root}/${f.path}`}
+                    className="fr-tree-file fr-git-only"
+                    title={f.path}
+                  >
+                    <span className="fr-tree-icon" style={{ color: icon.color }}>{icon.icon}</span>
+                    <span className="fr-tree-file-name">{basename(f.path)}</span>
+                    <span className="fr-git-status" style={{ color: gitStatusColor(f.status) }}>{f.status}</span>
+                  </div>
+                );
+              })
+            )}
           </div>
         )}
 

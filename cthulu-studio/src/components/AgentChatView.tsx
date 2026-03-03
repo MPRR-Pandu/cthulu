@@ -5,10 +5,11 @@ interface AgentChatViewProps {
   agentId: string;
   sessionId: string;
   busy?: boolean;
+  onAssistantComplete?: (fullText: string) => void;
 }
 
-export default function AgentChatView({ agentId, sessionId }: AgentChatViewProps) {
-  const chat = useAgentChat(agentId, sessionId);
+export default function AgentChatView({ agentId, sessionId, onAssistantComplete }: AgentChatViewProps) {
+  const chat = useAgentChat(agentId, sessionId, { onAssistantComplete });
 
   return (
     <AgentChatThread

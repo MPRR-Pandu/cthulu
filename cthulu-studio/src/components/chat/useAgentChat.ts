@@ -103,7 +103,12 @@ function applySSEEvent(
   return false;
 }
 
-export function useAgentChat(agentId: string, sessionId: string) {
+export interface UseAgentChatOptions {
+  onAssistantComplete?: (fullText: string) => void;
+}
+
+export function useAgentChat(agentId: string, sessionId: string, options?: UseAgentChatOptions) {
+  const onAssistantComplete = options?.onAssistantComplete;
   const [messages, setMessages] = useState<ThreadMessageLike[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingParts, setStreamingParts] = useState<ContentPart[]>([]);
@@ -227,12 +232,21 @@ export function useAgentChat(agentId: string, sessionId: string) {
         ...prev,
         { role: "assistant" as const, content: [...finalParts], createdAt: new Date() },
       ]);
+
+      // Notify caller with the full assistant text (for workflow command parsing, etc.)
+      if (onAssistantComplete) {
+        const fullText = finalParts
+          .filter((p) => p.type === "text")
+          .map((p) => (p as { type: "text"; text: string }).text)
+          .join("");
+        onAssistantComplete(fullText);
+      }
     }
     setStreamingParts([]);
     partsRef.current = [];
     setIsStreaming(false);
     setIsDone(true);
-  }, []);
+  }, [onAssistantComplete]);
 
   const resetStreaming = useCallback(() => {
     setStreamingParts([]);

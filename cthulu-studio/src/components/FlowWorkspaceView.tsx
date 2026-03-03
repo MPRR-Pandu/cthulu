@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect, type RefObject } from "react"
 import { STUDIO_ASSISTANT_ID, type Flow, type FlowNode, type FlowEdge, type RunEvent } from "../types/flow";
 import { listAgentSessions, newAgentSession } from "../api/client";
 import type { UpdateSignal } from "../hooks/useFlowDispatch";
+import { useWorkflowCommands, type CommandResult } from "../hooks/useWorkflowCommands";
 import Canvas, { type CanvasHandle } from "./Canvas";
 import FlowEditor, { type FlowEditorHandle } from "./FlowEditor";
 import RunLog from "./RunLog";
@@ -55,6 +56,23 @@ export default function FlowWorkspaceView({
   const [bottomTab, setBottomTab] = useState<BottomTab>("log");
 
   const [studioSessionId, setStudioSessionId] = useState<string | null>(null);
+
+  const [commandStatus, setCommandStatus] = useState<CommandResult | null>(null);
+
+  const { processAgentMessage } = useWorkflowCommands(canvasRef);
+
+  const handleAssistantComplete = useCallback(
+    (fullText: string) => {
+      const results = processAgentMessage(fullText);
+      if (results.length > 0) {
+        const last = results[results.length - 1];
+        setCommandStatus(last);
+        // Auto-clear the status after 5 seconds
+        setTimeout(() => setCommandStatus(null), 5000);
+      }
+    },
+    [processAgentMessage],
+  );
 
   const editorRef = useRef<FlowEditorHandle>(null);
   const hDragRef = useRef<{ startX: number; startW: number } | null>(null);
@@ -279,9 +297,24 @@ export default function FlowWorkspaceView({
                   key={`workspace-chat:${STUDIO_ASSISTANT_ID}`}
                   agentId={STUDIO_ASSISTANT_ID}
                   sessionId={studioSessionId}
+                  onAssistantComplete={handleAssistantComplete}
                 />
               )}
             </div>
+            {commandStatus && (
+              <div
+                style={{
+                  padding: "4px 12px",
+                  fontSize: 12,
+                  fontFamily: '"SF Mono", "Fira Code", "Cascadia Code", monospace',
+                  color: commandStatus.success ? "var(--accent)" : "var(--text-secondary)",
+                  borderTop: "1px solid var(--border)",
+                  background: "var(--bg-secondary)",
+                }}
+              >
+                {commandStatus.success ? "\u2713" : "\u2717"} {commandStatus.message}
+              </div>
+            )}
           </div>
         </>
       )}

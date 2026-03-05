@@ -22,9 +22,10 @@
     "graph": "nx graph"
   },
   "devDependencies": {
-    "@nx/next": "^20.8.0",
-    "@nx/vite": "^20.8.0",
-    "nx": "^20.8.0"
+    "@nx/next": "^20.8.4",
+    "@nx/vite": "^20.8.4",
+    "nx": "^20.8.4",
+    "vite": "^7.3.1"
   },
   "overrides": {
     "minimatch": "^10.2.1",

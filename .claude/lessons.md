@@ -116,3 +116,103 @@ Record corrections, mistakes, and insights here so future sessions can avoid rep
 - **Context**: Tried to run Firecracker inside Lima VM on macOS (both vz and qemu backends).
 - **Mistake**: Spent significant time trying to get `/dev/kvm` working.
 - **Fix**: Apple Silicon does not expose ARM virtualization extensions to guest VMs. Neither Lima backend works. Use the VM Manager API on a real Linux server instead. Documented in `NOPE.md`.
+
+## 2026-03-05 - Add features to the correct component, not the nearest one
+
+- **Context**: Adding a search bar for template filtering when user clicks "Add New Flow".
+- **Mistake**: Added the search bar to `TopBar.tsx` instead of `TemplateGallery.tsx`. The TopBar is always visible but the template search only makes sense inside the modal that appears when creating a new flow.
+- **Fix**: Always trace the user flow first. "Add New Flow" opens `TemplateGallery` modal -- that is where the search bar belongs. Had to clean up the TopBar changes and redo them in `TemplateGallery.tsx`.
+
+## 2026-03-05 - useDeferredValue and empty-state text must use the same value
+
+- **Context**: Using `useDeferredValue(searchQuery)` for performance in `TemplateGallery.tsx` filtering.
+- **Mistake**: The `filtered` useMemo used `deferredSearch` but the empty-state message (`No templates matching "X"`) used `searchQuery` (immediate). During fast typing, the message could flash "No templates matching X" while the grid still showed stale results from the previous deferred value.
+- **Fix**: Any UI that depends on the filtered results must read from the same deferred value. Use `deferredSearch` for both the `useMemo` filter and the empty-state conditional text.
+
+## 2026-03-05 - Consolidate related useEffects to avoid double-firing
+
+- **Context**: Two separate `useEffect`s in `TemplateGallery.tsx` -- one for auto-focusing the search input on mount, another for Escape key handling.
+- **Mistake**: The auto-focus effect had no cleanup for its `setTimeout`. If the component unmounted quickly, the timer would fire on an unmounted ref. Also, having two separate effects for related keyboard/focus logic made the component harder to reason about.
+- **Fix**: Merge into a single `useEffect` that handles both auto-focus (with `clearTimeout` in cleanup) and keyboard events (with `removeEventListener` in cleanup). One effect, one cleanup function, no leaks.
+
+## 2026-03-05 - npm workspace hoisting causes "Cannot find package" errors
+
+- **Context**: `@tailwindcss/vite` was hoisted to `node_modules/@tailwindcss/vite/` at the monorepo root, but `vite` only existed in `cthulu-studio/node_modules/vite/`. When `@tailwindcss/vite` tried `import 'vite'`, Node resolved from the root and failed with `ERR_MODULE_NOT_FOUND`.
+- **Mistake**: Did not account for npm workspace hoisting behavior. A dependency of a workspace package (`@tailwindcss/vite`) was hoisted to root, but its peer dependency (`vite`) was not.
+- **Fix**: Add `vite` to the root `package.json` `devDependencies` so it gets hoisted alongside `@tailwindcss/vite`. General rule: if package A is hoisted and depends on package B, B must also be available at the root level.
+
+## 2026-03-05 - npm audit fix vs major version bumps -- be conservative
+
+- **Context**: Running `npm audit` showed vulnerabilities in `dompurify`, `immutable`, and `serialize-javascript`. Also bumping all packages to latest.
+- **Mistake**: `npm-check-updates` wanted to bump Nx from 20 to 22 and Next.js from 15 to 16 -- both major version jumps with potential breaking changes.
+- **Fix**: Use `--target minor` for packages with major bumps (Nx, Next.js) and `--reject` to exclude them from the blanket latest upgrade. Bump within the current major version: Nx 20.8.0 -> 20.8.4, Next.js 15.0.0 -> 15.5.12. Bump everything else to absolute latest. Always verify with `npx tsc --noEmit` for both projects after bumping.
+
+---
+
+## Sandbox Module Lessons (consolidated from root LESSONS.md)
+
+## 2026-02-25 - FsJail path canonicalization on macOS
+
+- **Context**: `FsJail.resolve()` used `std::fs::canonicalize()` to check path containment.
+- **Mistake**: `canonicalize()` fails on non-existent paths. On macOS, `/var` → `/private/var` symlink breaks `starts_with` checks.
+- **Fix**: Don't use `canonicalize()`. Manually normalize path components by resolving `.` and `..` segments. File: `src/sandbox/local_host/fs_jail.rs`.
+
+## 2026-02-25 - FlowRunner construction sites are spread across codebase
+
+- **Context**: Adding a field to `FlowRunner`.
+- **Mistake**: Missing one of the 7 construction sites caused compile errors.
+- **Fix**: Grep for `FlowRunner {` or `FlowRunner::new` — 4 in `src/server/flow_routes/mod.rs`, 3 in `src/flows/scheduler.rs`.
+
+## 2026-02-25 - reqwest is already a dependency — use it
+
+- **Context**: Needed an HTTP client for FC TCP transport.
+- **Mistake**: Considered adding a new dependency.
+- **Fix**: `reqwest` is already in `Cargo.toml`. Reuse existing deps before adding new ones.
+
+## 2026-02-25 - Don't build Firecracker inside Lima VM
+
+- **Context**: Tried building FC from source in Lima.
+- **Mistake**: Slow and painful.
+- **Fix**: Download the release binary directly from GitHub releases.
+
+## 2026-02-25 - VM Manager API is the production path, not raw Firecracker
+
+- **Context**: Choosing between direct FC control vs VM Manager abstraction.
+- **Mistake**: `FirecrackerProvider` is ~780 lines of complex transport/provisioning logic.
+- **Fix**: `VmManagerProvider` is ~200 lines of HTTP client code. Use VM Manager for production.
+
+## 2026-02-25 - Browser terminal iframe — direct URL, not proxied
+
+- **Context**: Embedding ttyd web terminal in BottomPanel.
+- **Mistake**: Considered proxying WebSocket through Cthulu — adds complexity and latency.
+- **Fix**: Iframe `src` points directly to VM Manager's `web_terminal` URL. No proxy. User's browser must reach VM Manager host directly.
+
+## 2026-02-25 - VmManagerProvider node_vms is in-memory only
+
+- **Context**: After server restart, clicking vm-sandbox node spun up a new VM, wasting resources.
+- **Mistake**: `node_vms` HashMap was not persisted.
+- **Fix**: Fall back to `vm_mappings` in `sessions.yaml`. Call `restore_node_vm(vm_id)` to verify VM is still alive, re-seed in-memory map. Only provision new if VM returns 404.
+
+## 2026-02-25 - inject_oauth_token must write full credentials blob
+
+- **Context**: Claude CLI inside VMs showing login prompt after token injection.
+- **Mistake**: Only wrote `accessToken` and `tokenType` — Claude CLI treated as incomplete session.
+- **Fix**: Write ALL fields: `accessToken`, `refreshToken`, `expiresAt`, `scopes`, `subscriptionType`, `rateLimitTier`.
+
+## 2026-02-25 - .bashrc token injection must replace, not skip
+
+- **Context**: Token refresh in VM `.bashrc`.
+- **Mistake**: Had skip-if-present logic (`if ! grep -q`). Stale tokens were never updated.
+- **Fix**: Always `sed -i` to delete existing line, then append new value. Idempotent.
+
+## 2026-02-25 - isAuthError false positives on bare "401"
+
+- **Context**: `isAuthError()` in `NodeChat.tsx` killed Claude sessions on false positives.
+- **Mistake**: Matched any message containing `"401"` — including PR numbers, port numbers, hashes.
+- **Fix**: Match specific patterns only: `"401 Unauthorized"`, `"HTTP 401"`, `"Authentication required"`, `"Invalid API key"`, `"not authenticated"`, `"claude login"`.
+
+## 2026-02-25 - flow_routes.rs was split into a module directory
+
+- **Context**: `src/server/flow_routes.rs` grew too large.
+- **Mistake**: Documentation still referenced the old single-file path.
+- **Fix**: Updated to `src/server/flow_routes/` with sub-modules (`mod.rs`, `crud.rs`, `sandbox.rs`, `interact.rs`, `node_chat.rs`).

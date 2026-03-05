@@ -1128,6 +1128,7 @@ button:disabled {
   color: var(--text);
 }
 
+
 .palette-item {
   display: flex;
   align-items: center;
@@ -1753,6 +1754,67 @@ button:disabled {
 .tg-close:hover {
   color: var(--text);
   background: var(--bg-tertiary);
+}
+
+/* ── Template Gallery Search Bar ── */
+.tg-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 20px;
+  height: 44px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.tg-search-icon {
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.tg-search-input {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--text);
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.tg-search-input::placeholder {
+  color: var(--text-secondary);
+  opacity: 0.7;
+}
+
+.tg-search-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.tg-search-clear {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s;
+}
+
+.tg-search-clear:hover {
+  background: var(--border);
+  color: var(--text);
 }
 
 /* Category tabs */

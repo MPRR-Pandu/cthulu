@@ -10,7 +10,7 @@
  *  - GitHub raw link
  *  - "Use Template" one-click import
  */
-import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback, useDeferredValue } from "react";
 import { listTemplates, importTemplate, importYaml, importFromGithub, getServerUrl } from "../api/client";
 import type { TemplateMetadata, Flow } from "../types/flow";
 import MiniFlowDiagram from "./MiniFlowDiagram";
@@ -58,6 +58,9 @@ export default function TemplateGallery({
   const [expandedYaml, setExpandedYaml] = useState<string | null>(null);
   const [hoveredCard, setHoveredCard] = useState<string | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const deferredSearch = useDeferredValue(searchQuery);
+  const searchRef = useRef<HTMLInputElement>(null);
 
   // Upload / GitHub import state
   const [ghUrl, setGhUrl] = useState("");
@@ -84,10 +87,29 @@ export default function TemplateGallery({
     return cats;
   }, [templates]);
 
+  /**
+   * Consolidated filtering: category first, then text search.
+   * Uses deferredSearch so the input stays snappy even with 500+ templates.
+   */
   const filtered = useMemo(() => {
-    if (activeCategory === "all") return templates;
-    return templates.filter((t) => t.category === activeCategory);
-  }, [templates, activeCategory]);
+    // Step 1: filter by category
+    const byCategory =
+      activeCategory === "all"
+        ? templates
+        : templates.filter((t) => t.category === activeCategory);
+
+    // Step 2: filter by search query
+    const q = deferredSearch.trim().toLowerCase();
+    if (!q) return byCategory;
+
+    return byCategory.filter((t) =>
+      t.title.toLowerCase().includes(q) ||
+      t.description.toLowerCase().includes(q) ||
+      t.slug.toLowerCase().includes(q) ||
+      t.category.toLowerCase().includes(q) ||
+      t.tags.some((tag) => tag.toLowerCase().includes(q))
+    );
+  }, [templates, activeCategory, deferredSearch]);
 
   const handleImport = useCallback(
     async (template: TemplateMetadata) => {
@@ -163,14 +185,30 @@ export default function TemplateGallery({
     }
   }, [ghUrl, ghPath, ghBranch, onImport]);
 
-  // Close on Escape
+  /**
+   * Keyboard UX + auto-focus (single consolidated effect).
+   * - Auto-focuses the search input on mount.
+   * - Escape: clears search if input is focused and has text, otherwise closes modal.
+   */
   useEffect(() => {
+    const focusTimer = setTimeout(() => searchRef.current?.focus(), 100);
+
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        if (searchQuery && document.activeElement === searchRef.current) {
+          setSearchQuery("");
+        } else {
+          onClose();
+        }
+      }
     };
     window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [onClose]);
+
+    return () => {
+      clearTimeout(focusTimer);
+      window.removeEventListener("keydown", handler);
+    };
+  }, [onClose, searchQuery]);
 
   return (
     <div className="tg-overlay" onClick={onClose}>
@@ -192,6 +230,44 @@ export default function TemplateGallery({
           <button className="tg-close" onClick={onClose} aria-label="Close">
             ✕
           </button>
+        </div>
+
+        {/* Search bar */}
+        <div className="tg-search">
+          <svg
+            className="tg-search-icon"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+          <input
+            ref={searchRef}
+            className="tg-search-input"
+            type="text"
+            placeholder="Search templates by name, tag, or category..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+          {searchQuery && (
+            <button
+              className="tg-search-clear"
+              onClick={() => { setSearchQuery(""); searchRef.current?.focus(); }}
+              aria-label="Clear search"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                <line x1="6" y1="6" x2="18" y2="18" />
+                <line x1="6" y1="18" x2="18" y2="6" />
+              </svg>
+            </button>
+          )}
         </div>
 
         {/* Import panel: Upload YAML + GitHub */}
@@ -309,7 +385,11 @@ export default function TemplateGallery({
           )}
 
           {!loading && !error && filtered.length === 0 && (
-            <div className="tg-empty">No templates in this category.</div>
+            <div className="tg-empty">
+              {deferredSearch
+                ? `No templates matching "${deferredSearch}".`
+                : "No templates in this category."}
+            </div>
           )}
 
           {!loading && !error && (

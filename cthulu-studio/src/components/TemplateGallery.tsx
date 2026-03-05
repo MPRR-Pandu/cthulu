@@ -10,7 +10,7 @@
  *  - GitHub raw link
  *  - "Use Template" one-click import
  */
-import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback, useDeferredValue } from "react";
 import { listTemplates, importTemplate, importYaml, importFromGithub, getServerUrl } from "../api/client";
 import type { TemplateMetadata, Flow } from "../types/flow";
 import MiniFlowDiagram from "./MiniFlowDiagram";
@@ -59,6 +59,7 @@ export default function TemplateGallery({
   const [hoveredCard, setHoveredCard] = useState<string | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const deferredSearch = useDeferredValue(searchQuery);
   const searchRef = useRef<HTMLInputElement>(null);
 
   // Upload / GitHub import state
@@ -86,21 +87,29 @@ export default function TemplateGallery({
     return cats;
   }, [templates]);
 
+  /**
+   * Consolidated filtering: category first, then text search.
+   * Uses deferredSearch so the input stays snappy even with 500+ templates.
+   */
   const filtered = useMemo(() => {
-    let results = activeCategory === "all" ? templates : templates.filter((t) => t.category === activeCategory);
-    const q = searchQuery.trim().toLowerCase();
-    if (q) {
-      results = results.filter(
-        (t) =>
-          t.title.toLowerCase().includes(q) ||
-          t.description.toLowerCase().includes(q) ||
-          t.slug.toLowerCase().includes(q) ||
-          t.category.toLowerCase().includes(q) ||
-          t.tags.some((tag) => tag.toLowerCase().includes(q))
-      );
-    }
-    return results;
-  }, [templates, activeCategory, searchQuery]);
+    // Step 1: filter by category
+    const byCategory =
+      activeCategory === "all"
+        ? templates
+        : templates.filter((t) => t.category === activeCategory);
+
+    // Step 2: filter by search query
+    const q = deferredSearch.trim().toLowerCase();
+    if (!q) return byCategory;
+
+    return byCategory.filter((t) =>
+      t.title.toLowerCase().includes(q) ||
+      t.description.toLowerCase().includes(q) ||
+      t.slug.toLowerCase().includes(q) ||
+      t.category.toLowerCase().includes(q) ||
+      t.tags.some((tag) => tag.toLowerCase().includes(q))
+    );
+  }, [templates, activeCategory, deferredSearch]);
 
   const handleImport = useCallback(
     async (template: TemplateMetadata) => {
@@ -176,13 +185,14 @@ export default function TemplateGallery({
     }
   }, [ghUrl, ghPath, ghBranch, onImport]);
 
-  // Auto-focus search on mount
+  /**
+   * Keyboard UX + auto-focus (single consolidated effect).
+   * - Auto-focuses the search input on mount.
+   * - Escape: clears search if input is focused and has text, otherwise closes modal.
+   */
   useEffect(() => {
-    setTimeout(() => searchRef.current?.focus(), 100);
-  }, []);
+    const focusTimer = setTimeout(() => searchRef.current?.focus(), 100);
 
-  // Close on Escape (only if search is not focused or empty)
-  useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         if (searchQuery && document.activeElement === searchRef.current) {
@@ -193,7 +203,11 @@ export default function TemplateGallery({
       }
     };
     window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
+
+    return () => {
+      clearTimeout(focusTimer);
+      window.removeEventListener("keydown", handler);
+    };
   }, [onClose, searchQuery]);
 
   return (

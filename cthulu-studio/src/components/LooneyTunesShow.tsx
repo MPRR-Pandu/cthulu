@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { animate, createScope, spring } from "animejs";
+import { animate, createScope, createTimeline, spring } from "animejs";
 import type { Scope } from "animejs";
 
 /* ------------------------------------------------------------------ */
@@ -97,40 +97,21 @@ const ROAD_RUNNER_RUN = `\
               <(_______.._______)>`;
 
 /* ------------------------------------------------------------------ */
-/*  "Meep Meep" sound via Web Audio API                                */
+/*  "Meep Meep" sound via MP3 file                                     */
 /* ------------------------------------------------------------------ */
 
-let audioCtx: AudioContext | null = null;
+let meepAudio: HTMLAudioElement | null = null;
 
 function playMeepMeep() {
   try {
-    if (!audioCtx) audioCtx = new AudioContext();
-    const ctx = audioCtx;
-
-    const playBeep = (startTime: number, freq: number, dur: number) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.type = "sine";
-      osc.frequency.setValueAtTime(freq, startTime);
-      // Quick pitch slide up for cartoon feel
-      osc.frequency.linearRampToValueAtTime(freq * 1.3, startTime + dur * 0.3);
-      osc.frequency.linearRampToValueAtTime(freq * 1.1, startTime + dur);
-      gain.gain.setValueAtTime(0, startTime);
-      gain.gain.linearRampToValueAtTime(0.15, startTime + 0.01);
-      gain.gain.setValueAtTime(0.15, startTime + dur - 0.02);
-      gain.gain.linearRampToValueAtTime(0, startTime + dur);
-      osc.start(startTime);
-      osc.stop(startTime + dur);
-    };
-
-    const now = ctx.currentTime;
-    // Two quick high-pitched beeps: "meep meep!"
-    playBeep(now, 1800, 0.12);
-    playBeep(now + 0.18, 2200, 0.12);
+    if (!meepAudio) {
+      meepAudio = new Audio("/meep-meep.mp3");
+      meepAudio.volume = 0.7;
+    }
+    meepAudio.currentTime = 0;
+    meepAudio.play().catch(() => {});
   } catch {
-    // Audio not available — no-op
+    // Audio not available
   }
 }
 
@@ -144,9 +125,8 @@ export default function LooneyTunesShow() {
   const scopeRef = useRef<Scope | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [pokeCount, setPokeCount] = useState(0);
-  const runTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Idle animation — gentle breathing/floating
+  // Idle animation — springy floating bob
   useEffect(() => {
     if (!artRef.current || isRunning) return;
 
@@ -159,9 +139,9 @@ export default function LooneyTunesShow() {
 
     scopeRef.current = createScope({ root: el }).add(() => {
       animate(el, {
-        translateY: [-1, 1],
-        duration: 800,
-        ease: "inOutSine",
+        translateY: [-2, 2],
+        duration: 1500,
+        ease: spring({ stiffness: 80, damping: 12 }),
         alternate: true,
         loop: true,
       });
@@ -175,13 +155,11 @@ export default function LooneyTunesShow() {
     };
   }, [isRunning]);
 
-  // Handle click — meep meep + run away + come back
+  // Handle click — meep meep + smooth run away + spring pop back
   const handleClick = useCallback(() => {
-    if (isRunning) return;
+    if (isRunning || !artRef.current) return;
 
     setPokeCount((c) => c + 1);
-
-    // Play sound
     playMeepMeep();
 
     // Stop idle animation
@@ -192,53 +170,76 @@ export default function LooneyTunesShow() {
 
     setIsRunning(true);
 
-    // Run away animation
-    if (artRef.current) {
-      const el = artRef.current;
+    const el = artRef.current;
 
-      // Quick squish then zoom off to the right
-      animate(el, {
-        scaleX: [1, 1.2, 0.8],
-        scaleY: [1, 0.8, 1.1],
-        duration: 200,
-        ease: spring({ stiffness: 400, damping: 15 }),
-      });
+    // Build timeline: squish → zoom right & shrink into distance → fade → spring back
+    const tl = createTimeline({
+      onComplete: () => {
+        el.style.transform = "";
+        el.style.opacity = "1";
+        setIsRunning(false);
+      },
+    });
 
-      // After squish, zoom off screen
-      setTimeout(() => {
-        if (!artRef.current) return;
-        animate(artRef.current, {
-          translateX: [0, 400],
-          opacity: [1, 0],
-          duration: 300,
-          ease: "inExpo",
-        });
-      }, 200);
-    }
+    // 1. Squish anticipation (crouching before takeoff)
+    tl.add(el, {
+      scaleX: [1, 1.15, 0.9],
+      scaleY: [1, 0.85, 1.05],
+      duration: 250,
+      ease: spring({ stiffness: 500, damping: 18 }),
+    });
 
-    // Clear any existing return timeout
-    if (runTimeoutRef.current) clearTimeout(runTimeoutRef.current);
+    // 2. Zoom away — swoop right and curve up, shrinking into the distance
+    tl.add(
+      el,
+      {
+        translateX: [0, 40, 80, 60, 20],
+        translateY: [0, -5, -30, -70, -90],
+        scale: [1, 0.8, 0.4, 0.15, 0.1],
+        rotate: [0, -5, -15, -10, 0],
+        opacity: [1, 1, 0.7, 0.3, 0],
+        duration: 1400,
+        ease: "inOutQuad",
+      },
+      250,
+    );
 
-    // Come back after a beat
-    runTimeoutRef.current = setTimeout(() => {
-      if (!artRef.current) return;
-      // Slide back in from left
-      animate(artRef.current, {
-        translateX: [-300, 0],
+    // 3. Hold invisible, reset position for pop-back
+    tl.add(
+      el,
+      {
+        opacity: 0,
+        scale: 0.1,
+        translateX: 0,
+        translateY: 0,
+        duration: 100,
+      },
+      1700,
+    );
+
+    // 4. Spring pop back at original position (synced to MP3 end ~3.16s)
+    tl.add(
+      el,
+      {
+        scale: [0.1, 1],
         opacity: [0, 1],
-        duration: 500,
-        ease: "outExpo",
-        onComplete: () => {
-          setIsRunning(false);
-        },
-      });
-    }, 1200);
+        translateX: 0,
+        translateY: 0,
+        rotate: 0,
+        duration: 800,
+        ease: spring({ stiffness: 200, damping: 15 }),
+      },
+      3000,
+    );
   }, [isRunning]);
 
-  // Cleanup timeout on unmount
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (runTimeoutRef.current) clearTimeout(runTimeoutRef.current);
+      if (scopeRef.current) {
+        scopeRef.current.revert();
+        scopeRef.current = null;
+      }
     };
   }, []);
 

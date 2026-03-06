@@ -343,7 +343,6 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
         data_dir: base_dir.clone(),
         static_dir,
         live_processes: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-        pty_processes: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         sandbox_provider,
         oauth_token: Arc::new(tokio::sync::RwLock::new(oauth_token)),
         session_streams,
@@ -363,7 +362,6 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
     )
     .context("failed to start file change watcher")?;
 
-    let pty_processes = app_state.pty_processes.clone();
     let live_processes = app_state.live_processes.clone();
 
     let app = api::create_app(app_state)
@@ -378,14 +376,8 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
         .with_graceful_shutdown(shutdown_signal())
         .await?;
 
-    // Server has stopped — kill all child processes then exit immediately.
-    // We can't wait for spawn_blocking PTY reader threads (they hold cloned fds
-    // and block on read()), so we kill children and force-exit.
+    // Server has stopped — kill all child processes then exit.
     tracing::info!("shutting down: killing child processes");
-    {
-        let mut pool = pty_processes.lock().await;
-        pool.clear(); // Drop triggers PtyProcess::drop which calls child.kill()
-    }
     {
         let mut pool = live_processes.lock().await;
         for (key, mut proc) in pool.drain() {
@@ -394,7 +386,6 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
             }
         }
     }
-    // Force exit — spawn_blocking reader threads can't be stopped gracefully
     std::process::exit(0);
 
     Ok(())

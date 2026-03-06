@@ -37,12 +37,6 @@ export function getServerUrl(): string {
   return getBaseUrl();
 }
 
-export function getTerminalWsUrl(agentId: string, sessionId?: string): string {
-  const wsBase = getBaseUrl().replace(/^http/, "ws");
-  const base = `${wsBase}/api/agents/${agentId}/terminal`;
-  return sessionId ? `${base}?session_id=${encodeURIComponent(sessionId)}` : base;
-}
-
 async function apiFetch<T>(
   path: string,
   options: RequestInit = {}

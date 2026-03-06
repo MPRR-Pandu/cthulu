@@ -274,11 +274,11 @@ button:disabled {
 
 /* ---- Road Runner mascot (collapsible) ---- */
 .sidebar-toon-dancer {
-  padding: 4px 8px;
+  padding: 12px 8px 8px;
   border-bottom: 1px solid var(--border);
   background: var(--bg);
   text-align: center;
-  overflow: hidden;
+  overflow: visible;
   transition: background 0.2s;
 }
 .sidebar-toon-dancer:hover {
@@ -326,12 +326,21 @@ button:disabled {
   color: var(--accent);
   letter-spacing: 0.3px;
 }
+.toon-char-name {
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-size: 8px;
+  font-weight: 600;
+  color: var(--accent);
+  margin-top: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
 .toon-dialog {
   font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
-  font-size: 9px;
-  color: var(--text-secondary);
-  margin-top: 2px;
-  padding: 2px 6px;
+  font-size: 10px;
+  color: var(--text);
+  margin-top: 8px;
+  padding: 4px 8px;
   border: 1px dashed var(--border);
   border-radius: 4px;
   display: inline-block;

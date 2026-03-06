@@ -270,6 +270,7 @@ export default function LooneyTunesShow() {
               {asciiArt}
             </pre>
           </div>
+          <div className="toon-char-name">Road Runner</div>
           <div className="toon-dialog">
             {isRunning ? "MEEP MEEP! *zooooom*" : "Click me... if you can!"}
           </div>

@@ -100,6 +100,7 @@ export default function FlowWorkspaceView({
   const [bottomTab, setBottomTab] = useState<BottomTab>("log");
 
   const [studioSessionId, setStudioSessionId] = useState<string | null>(null);
+  const studioChat = useAgentChat(STUDIO_ASSISTANT_ID, studioSessionId ?? "");
 
   // Tab visibility: which tabs are shown (VS Code-style toggle)
   const [visibleTabs, setVisibleTabs] = useState<Set<BottomTab>>(

@@ -133,3 +133,34 @@ pub fn default_studio_assistant() -> Agent {
         ])
         .build()
 }
+
+pub const BUGS_BUNNY_ID: &str = "bugs-bunny";
+pub const DAFFY_DUCK_ID: &str = "daffy-duck";
+pub const TWEETY_BIRD_ID: &str = "tweety-bird";
+
+pub fn default_bugs_bunny() -> Agent {
+    Agent::builder(BUGS_BUNNY_ID)
+        .name("Bugs Bunny")
+        .description("Code reviewer. Finds bugs, code smells, and logic errors.")
+        .prompt(include_str!("bugs_bunny_prompt.md"))
+        .permissions(vec!["Read".into(), "Grep".into(), "Glob".into()])
+        .build()
+}
+
+pub fn default_daffy_duck() -> Agent {
+    Agent::builder(DAFFY_DUCK_ID)
+        .name("Daffy Duck")
+        .description("Bug fixer. Takes review findings and fixes them.")
+        .prompt(include_str!("daffy_duck_prompt.md"))
+        .permissions(vec!["Read".into(), "Edit".into(), "Grep".into(), "Glob".into()])
+        .build()
+}
+
+pub fn default_tweety_bird() -> Agent {
+    Agent::builder(TWEETY_BIRD_ID)
+        .name("Tweety Bird")
+        .description("Test runner. Runs tests, reports results, identifies coverage gaps.")
+        .prompt(include_str!("tweety_bird_prompt.md"))
+        .permissions(vec!["Read".into(), "Bash".into(), "Glob".into()])
+        .build()
+}

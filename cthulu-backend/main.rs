@@ -145,15 +145,30 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
         .context("failed to load agent repository")?;
     let agent_repo: Arc<dyn AgentRepository> = file_agent_repo.clone();
 
-    // Seed the built-in Studio Assistant (with sub-agents) if it doesn't exist yet.
+    // Seed or migrate the built-in Studio Assistant with sub-agents.
     // Sub-agents (code-reviewer, bugs-bunny, daffy-duck, tweety-bird) are embedded
     // in the Studio Assistant's subagents field and passed via --agents to Claude Code.
-    if agent_repo.get(STUDIO_ASSISTANT_ID).await.is_none() {
-        tracing::info!("seeding built-in Studio Assistant agent with sub-agents");
-        agent_repo
-            .save(default_studio_assistant())
-            .await
-            .with_context(|| "failed to seed Studio Assistant agent")?;
+    match agent_repo.get(STUDIO_ASSISTANT_ID).await {
+        None => {
+            tracing::info!("seeding built-in Studio Assistant agent with sub-agents");
+            agent_repo
+                .save(default_studio_assistant())
+                .await
+                .with_context(|| "failed to seed Studio Assistant agent")?;
+        }
+        Some(existing) if existing.subagents.is_empty() => {
+            // Migration: existing install has Studio Assistant without sub-agents.
+            // Update it with the default sub-agents so the feature works.
+            tracing::info!("migrating Studio Assistant: adding default sub-agents");
+            let mut updated = existing;
+            updated.subagents = crate::agents::default_subagents();
+            updated.updated_at = chrono::Utc::now();
+            agent_repo
+                .save(updated)
+                .await
+                .with_context(|| "failed to migrate Studio Assistant with sub-agents")?;
+        }
+        Some(_) => {} // Already has sub-agents, nothing to do
     }
 
     let (events_tx, _) = tokio::sync::broadcast::channel::<RunEvent>(256);

@@ -2,7 +2,7 @@ export const STUDIO_ASSISTANT_ID = "studio-assistant";
 
 export type NodeType = "trigger" | "source" | "executor" | "sink";
 
-export type ActiveView = "flow-editor" | "agent-workspace" | "prompt-editor";
+export type ActiveView = "flow-editor" | "agent-workspace" | "prompt-editor" | "workflows";
 
 export interface Position {
   x: number;
@@ -160,6 +160,17 @@ export interface PipelineShape {
   sources: string[];
   executors: string[];
   sinks: string[];
+}
+
+// ---------------------------------------------------------------------------
+// Workflows (GitHub-backed)
+// ---------------------------------------------------------------------------
+
+export interface WorkflowSummary {
+  name: string;
+  workspace: string;
+  description?: string;
+  node_count: number;
 }
 
 /** Metadata for a single workflow template loaded from static/workflows/. */

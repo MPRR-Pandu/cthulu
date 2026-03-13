@@ -42,6 +42,14 @@ interface TopBarProps {
   onBackToFlow: () => void;
   onSettingsClick: () => void;
   onReconnect?: () => void;
+  onNavigate?: (view: ActiveView) => void;
+  onPublish?: () => void;
+  onSaveWorkflow?: () => void;
+  editingWorkflow?: { workspace: string; name: string } | null;
+  workspaces?: string[];
+  activeWorkspace?: string | null;
+  onSelectWorkspace?: (ws: string) => void;
+  onCreateWorkspace?: () => void;
 }
 
 export default function TopBar({
@@ -55,6 +63,14 @@ export default function TopBar({
   onBackToFlow,
   onSettingsClick,
   onReconnect,
+  onNavigate,
+  onPublish,
+  onSaveWorkflow,
+  editingWorkflow,
+  workspaces,
+  activeWorkspace,
+  onSelectWorkspace,
+  onCreateWorkspace,
 }: TopBarProps) {
   const [connected, setConnected] = useState(false);
   const [nextRun, setNextRun] = useState<string | null>(null);
@@ -144,6 +160,54 @@ export default function TopBar({
     <div className="top-bar">
       <h1>Cthulu Studio</h1>
 
+      <div className="top-bar-nav">
+        <button
+          className={`top-bar-nav-item${activeView !== "workflows" ? " active" : ""}`}
+          onClick={() => onNavigate?.("flow-editor")}
+        >
+          Agents
+        </button>
+        <button
+          className={`top-bar-nav-item${activeView === "workflows" ? " active" : ""}`}
+          onClick={() => onNavigate?.("workflows")}
+        >
+          Workflows
+        </button>
+      </div>
+
+      {activeView === "workflows" && !editingWorkflow && (
+        <div className="workspace-selector">
+          {workspaces && workspaces.length > 0 ? (
+            <Select
+              value={activeWorkspace ?? undefined}
+              onValueChange={onSelectWorkspace}
+            >
+              <SelectTrigger size="sm" className="text-xs h-7 min-w-[180px]">
+                <SelectValue placeholder="Select workspace" />
+              </SelectTrigger>
+              <SelectContent position="popper" sideOffset={4}>
+                {workspaces.map((ws) => (
+                  <SelectItem key={ws} value={ws} className="text-xs">
+                    {ws}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <span className="text-sm text-[var(--text-secondary)]">
+              No workspaces yet
+            </span>
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onCreateWorkspace}
+          >
+            + New Workspace
+          </Button>
+        </div>
+      )}
+
       {activeView === "agent-workspace" && (
         <Button variant="ghost" size="sm" className="top-bar-back" onClick={onBackToFlow}>
           ← Back
@@ -159,7 +223,18 @@ export default function TopBar({
         </>
       )}
 
-      {activeView === "flow-editor" && flow && (
+      {editingWorkflow && flow && (
+        <>
+          <Button variant="ghost" size="sm" className="top-bar-back" onClick={() => onNavigate?.("workflows")}>
+            ← Workflows
+          </Button>
+          <span className="flow-name" title={`${editingWorkflow.workspace}/${editingWorkflow.name}`}>
+            {flow.name}
+          </span>
+        </>
+      )}
+
+      {activeView === "flow-editor" && !editingWorkflow && flow && (
         <>
           {editing ? (
             <input
@@ -209,21 +284,46 @@ export default function TopBar({
 
       <div className="spacer" />
 
-      {activeView === "flow-editor" && flow && (
+      {editingWorkflow && onSaveWorkflow && (
         <Button
           size="sm"
-          onClick={onTrigger}
+          onClick={onSaveWorkflow}
           disabled={!connected}
-          title={
-            !connected
-              ? "Server disconnected"
-              : !(flow.enabled)
-                ? "Flow is disabled — manual run still works"
-                : undefined
-          }
+          title="Save workflow locally"
         >
-          Run{!(flow.enabled) ? " (Manual)" : ""}
+          Save
         </Button>
+      )}
+
+      {editingWorkflow && onPublish && (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onPublish}
+          disabled={!connected}
+          title="Save and push to GitHub"
+        >
+          Publish
+        </Button>
+      )}
+
+      {activeView === "flow-editor" && !editingWorkflow && flow && (
+        <>
+          <Button
+            size="sm"
+            onClick={onTrigger}
+            disabled={!connected}
+            title={
+              !connected
+                ? "Server disconnected"
+                : !(flow.enabled)
+                  ? "Flow is disabled — manual run still works"
+                  : undefined
+            }
+          >
+            Run{!(flow.enabled) ? " (Manual)" : ""}
+          </Button>
+        </>
       )}
 
       <div className="connection-status">

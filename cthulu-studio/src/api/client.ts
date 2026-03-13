@@ -610,6 +610,111 @@ export function subscribeToChanges(
 }
 
 // ---------------------------------------------------------------------------
+// Secrets / GitHub PAT
+// ---------------------------------------------------------------------------
+
+export async function getGithubPatStatus(): Promise<{ configured: boolean }> {
+  return apiFetch<{ configured: boolean }>("/secrets/github-pat");
+}
+
+export async function saveGithubPat(
+  token: string
+): Promise<{ ok: boolean; username: string }> {
+  return apiFetch<{ ok: boolean; username: string }>("/secrets/github-pat", {
+    method: "POST",
+    body: JSON.stringify({ token }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Workflows (GitHub-backed)
+// ---------------------------------------------------------------------------
+
+export async function setupWorkflows(): Promise<{
+  repo_url: string;
+  created: boolean;
+  username: string;
+}> {
+  return apiFetch("/workflows/setup", { method: "POST" });
+}
+
+export async function listWorkspaces(): Promise<{ workspaces: string[] }> {
+  return apiFetch<{ workspaces: string[] }>("/workflows/workspaces");
+}
+
+export async function createWorkspace(
+  name: string
+): Promise<{ ok: boolean; name: string }> {
+  return apiFetch("/workflows/workspaces", {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function listWorkflows(
+  workspace: string
+): Promise<{
+  workspace: string;
+  workflows: import("../types/flow").WorkflowSummary[];
+}> {
+  return apiFetch(`/workflows/workspaces/${encodeURIComponent(workspace)}`);
+}
+
+export async function getWorkflow(
+  workspace: string,
+  name: string
+): Promise<Record<string, unknown>> {
+  return apiFetch(
+    `/workflows/workspaces/${encodeURIComponent(workspace)}/${encodeURIComponent(name)}`
+  );
+}
+
+export async function saveWorkflow(
+  workspace: string,
+  name: string,
+  flow: Record<string, unknown>
+): Promise<{ ok: boolean }> {
+  return apiFetch(
+    `/workflows/workspaces/${encodeURIComponent(workspace)}/${encodeURIComponent(name)}/save`,
+    {
+      method: "POST",
+      body: JSON.stringify({ flow }),
+    }
+  );
+}
+
+export async function publishWorkflow(
+  workspace: string,
+  name: string,
+  flow: Record<string, unknown>
+): Promise<{ ok: boolean }> {
+  return apiFetch(
+    `/workflows/workspaces/${encodeURIComponent(workspace)}/${encodeURIComponent(name)}/publish`,
+    {
+      method: "POST",
+      body: JSON.stringify({ flow }),
+    }
+  );
+}
+
+export async function deleteWorkflow(
+  workspace: string,
+  name: string
+): Promise<{ ok: boolean }> {
+  return apiFetch(
+    `/workflows/workspaces/${encodeURIComponent(workspace)}/${encodeURIComponent(name)}`,
+    { method: "DELETE" }
+  );
+}
+
+export async function syncWorkflows(): Promise<{
+  ok: boolean;
+  workspaces: string[];
+}> {
+  return apiFetch("/workflows/sync", { method: "POST" });
+}
+
+// ---------------------------------------------------------------------------
 // Health / Connection
 // ---------------------------------------------------------------------------
 

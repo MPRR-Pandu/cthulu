@@ -10,6 +10,7 @@ mod api;
 mod tasks;
 mod templates;
 mod watcher;
+mod cloud;
 
 use anyhow::{Context, Result};
 use axum::body::Body;
@@ -177,6 +178,20 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
     // Load persisted interact sessions from ~/.cthulu/sessions.yaml
     let sessions_path = base_dir.join("sessions.yaml");
     let persisted_sessions = api::load_sessions(&sessions_path);
+
+    // Load GitHub PAT from secrets.json (if configured)
+    let secrets_path = base_dir.join("secrets.json");
+    let github_pat: Option<String> = if secrets_path.exists() {
+        std::fs::read_to_string(&secrets_path)
+            .ok()
+            .and_then(|content| serde_json::from_str::<serde_json::Value>(&content).ok())
+            .and_then(|v| v["github_pat"].as_str().map(String::from))
+    } else {
+        None
+    };
+    if github_pat.is_some() {
+        tracing::info!("GitHub PAT loaded from secrets.json");
+    }
 
     // Read OAuth token: macOS Keychain first, then CLAUDE_CODE_OAUTH_TOKEN env
     let oauth_token: Option<String> = {
@@ -347,6 +362,37 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
 
     tracing::info!(path = %static_dir.display(), "static directory");
 
+    // Pre-load template metadata into memory (avoids blocking disk I/O on every API call)
+    let template_cache = crate::templates::load_templates(&static_dir);
+    tracing::info!(count = template_cache.len(), "pre-loaded template cache");
+
+    // Initialize cloud VM pool (optional — only if VM_MANAGER_URL is set)
+    let vm_pool: Option<std::sync::Arc<cloud::VmPool>> = match std::env::var("VM_MANAGER_URL").ok().filter(|s| !s.is_empty()) {
+        Some(url) => {
+            let pool_size: usize = std::env::var("VM_POOL_SIZE")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(5);
+            let client = cloud::VmManagerClient::new(&url);
+            match cloud::VmPool::init(client, pool_size).await {
+                Ok(pool) => {
+                    tracing::info!(pool_size = pool.total_count().await, "cloud VM pool initialized");
+                    Some(pool)
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "failed to initialize cloud VM pool — cloud execution disabled");
+                    None
+                }
+            }
+        }
+        None => {
+            tracing::info!("VM_MANAGER_URL not set — cloud execution disabled");
+            None
+        }
+    };
+
+    let a2a_client = std::sync::Arc::new(cloud::A2aClient::new());
+
     let app_state = api::AppState {
         github_client,
         http_client,
@@ -360,6 +406,7 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
         sessions_path,
         data_dir: base_dir.clone(),
         static_dir,
+        template_cache: Arc::new(tokio::sync::RwLock::new(template_cache)),
         live_processes: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         sandbox_provider,
         oauth_token: Arc::new(tokio::sync::RwLock::new(oauth_token)),
@@ -369,6 +416,12 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
         pending_permissions: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         global_hook_tx: Arc::new(tokio::sync::broadcast::channel::<String>(256).0),
         server_port: config.port,
+        github_pat: Arc::new(tokio::sync::RwLock::new(github_pat)),
+        secrets_path,
+        cors_origins: config.cors_origins.clone(),
+        environment: config.environment.clone(),
+        vm_pool,
+        a2a_client,
     };
 
     // Start file change watcher (keeps caches in sync with external edits)

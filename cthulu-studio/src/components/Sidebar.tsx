@@ -1,11 +1,10 @@
 import { useState, useEffect, useCallback } from "react";
-import { STUDIO_ASSISTANT_ID, type FlowSummary, type Flow, type NodeTypeSchema, type AgentSummary, type SavedPrompt, type ActiveView } from "../types/flow";
+import { STUDIO_ASSISTANT_ID, type FlowSummary, type Flow, type NodeTypeSchema, type AgentSummary, type SavedPrompt, type ActiveView, type WorkflowSummary } from "../types/flow";
 import { listAgents, createAgent, deleteAgent, listPrompts, savePrompt, deletePrompt as deletePromptApi, listAgentSessions, newAgentSession } from "../api/client";
 import type { InteractSessionInfo } from "../api/client";
 import { Switch } from "@/components/ui/switch";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import TemplateGallery from "./TemplateGallery";
-import LooneyTunesShow from "./LooneyTunesShow";
 
 interface SidebarProps {
   // Flow list
@@ -30,6 +29,13 @@ interface SidebarProps {
   nodeTypes: NodeTypeSchema[];
   onGrab: (nodeType: NodeTypeSchema) => void;
   onCollapse: () => void;
+  // Workflows sidebar (only in workflows view)
+  activeWorkspace: string | null;
+  workflows: WorkflowSummary[];
+  onSelectWorkflow: (workspace: string, name: string) => void;
+  onCreateWorkflow: () => void;
+  onDeleteWorkflow: (workspace: string, name: string) => void;
+  editingWorkflow?: { workspace: string; name: string } | null;
 }
 
 const typeColors: Record<string, string> = {
@@ -58,6 +64,12 @@ export default function Sidebar({
   nodeTypes,
   onGrab,
   onCollapse,
+  activeWorkspace,
+  workflows,
+  onSelectWorkflow,
+  onCreateWorkflow,
+  onDeleteWorkflow,
+  editingWorkflow,
 }: SidebarProps) {
   const [showGallery, setShowGallery] = useState(false);
   const [agents, setAgents] = useState<AgentSummary[]>([]);
@@ -198,7 +210,53 @@ export default function Sidebar({
         />
       )}
 
-      <LooneyTunesShow />
+      {activeView === "workflows" ? (
+        <>
+          {/* Workflows in active workspace */}
+          {activeWorkspace && (
+            <Collapsible defaultOpen className="sidebar-section">
+              <CollapsibleTrigger asChild>
+                <div className="sidebar-section-header">
+                  <span className="sidebar-chevron">▶</span>
+                  <h2>Workflows</h2>
+                </div>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <div className="sidebar-section-body">
+                  {workflows.map((wf) => (
+                    <div
+                      key={wf.name}
+                      className={`sidebar-item${editingWorkflow?.workspace === wf.workspace && editingWorkflow?.name === wf.name ? " active" : ""}`}
+                      onClick={() => onSelectWorkflow(wf.workspace, wf.name)}
+                    >
+                      <div className="sidebar-item-row">
+                        <div className="sidebar-item-name">{wf.name}</div>
+                        <button
+                          className="ghost sidebar-delete-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onDeleteWorkflow(wf.workspace, wf.name);
+                          }}
+                          title="Delete workflow"
+                        >
+                          ×
+                        </button>
+                      </div>
+                      <div className="sidebar-item-meta">
+                        {wf.node_count} node{wf.node_count !== 1 ? "s" : ""}
+                      </div>
+                    </div>
+                  ))}
+                  {workflows.length === 0 && (
+                    <div className="sidebar-item-empty">No workflows in this workspace</div>
+                  )}
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
+          )}
+        </>
+      ) : (
+        <>
 
       {/* Agents section (primary, expanded by default) */}
       <Collapsible defaultOpen className="sidebar-section">
@@ -400,8 +458,11 @@ export default function Sidebar({
         </CollapsibleContent>
       </Collapsible>
 
-      {/* Node palette — only visible in flow editor with an active flow */}
-      {activeView === "flow-editor" && activeFlowId && (
+        </>
+      )}
+
+      {/* Node palette — visible in flow editor or when editing a workflow */}
+      {(activeView === "flow-editor" || editingWorkflow) && activeFlowId && (
         <Collapsible defaultOpen className="sidebar-section sidebar-palette-section">
           <CollapsibleTrigger asChild>
             <div className="sidebar-section-header">

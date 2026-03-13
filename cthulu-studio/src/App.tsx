@@ -2,12 +2,14 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import * as api from "./api/client";
 import { log } from "./api/logger";
 import { subscribeToRuns } from "./api/runStream";
-import type { Flow, FlowNode, FlowEdge, FlowSummary, NodeTypeSchema, RunEvent, ActiveView } from "./types/flow";
+import type { Flow, FlowNode, FlowEdge, FlowSummary, NodeTypeSchema, RunEvent, ActiveView, WorkflowSummary } from "./types/flow";
 import TopBar from "./components/TopBar";
 import Sidebar from "./components/Sidebar";
 import FlowWorkspaceView from "./components/FlowWorkspaceView";
 import AgentDetailView from "./components/AgentDetailView";
 import PromptEditorView from "./components/PromptEditorView";
+import WorkflowsView from "./components/WorkflowsView";
+import CreateWorkspaceDialog from "./components/CreateWorkspaceDialog";
 import { useGlobalPermissions } from "./hooks/useGlobalPermissions";
 import { type CanvasHandle } from "./components/Canvas";
 
@@ -41,6 +43,15 @@ export default function App() {
   const [runLogOpen, setRunLogOpen] = useState(false);
   const [activeView, setActiveView] = useState<ActiveView>("flow-editor");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  // --- Workflows state ---
+  const [wfWorkspaces, setWfWorkspaces] = useState<string[]>([]);
+  const [wfActiveWorkspace, setWfActiveWorkspace] = useState<string | null>(null);
+  const [wfWorkflows, setWfWorkflows] = useState<WorkflowSummary[]>([]);
+  const [showNewWorkspace, setShowNewWorkspace] = useState(false);
+  const [newWorkflowTrigger, setNewWorkflowTrigger] = useState(0);
+  // Tracks the workflow being edited in the flow editor (null = regular flow, not a workflow)
+  const [editingWorkflow, setEditingWorkflow] = useState<{ workspace: string; name: string } | null>(null);
 
   // --- Central flow state (extracted hook) ---
   const activeFlowIdRef = useRef(activeFlowId);
@@ -212,9 +223,159 @@ export default function App() {
       setActiveFlowId(flow.id);
       initFlow(flow);
       setSelectedNodeId(null);
+      setEditingWorkflow(null); // Regular flow, not a workflow
       setActiveView("flow-editor");
     } catch { /* logged */ }
   };
+
+  // Auto-wire edges: connect nodes sequentially in pipeline order
+  const autoWireEdges = (nodes: FlowNode[]): FlowEdge[] => {
+    const ORDER: Record<string, number> = { trigger: 0, source: 1, executor: 2, sink: 3 };
+    const sorted = [...nodes].sort(
+      (a, b) => (ORDER[a.node_type] ?? 9) - (ORDER[b.node_type] ?? 9)
+    );
+    return sorted.slice(0, -1).map((n, i) => ({
+      id: `edge-${i}`,
+      source: n.id,
+      target: sorted[i + 1].id,
+    }));
+  };
+
+  const openWorkflow = useCallback(async (workspace: string, name: string) => {
+    try {
+      const data = await api.getWorkflow(workspace, name);
+
+      let nodes: FlowNode[];
+      let edges: FlowEdge[];
+
+      if (Array.isArray(data.nodes)) {
+        // --- Flow format: { nodes: [...], edges: [...] } ---
+        // Normalize nodes that may lack `id` and `position` fields.
+        const rawNodes = data.nodes as Record<string, unknown>[];
+        nodes = rawNodes.map((n, i) => {
+          const pos = n.position as { x?: number; y?: number } | undefined;
+          return {
+            id: (n.id as string) || `node-${i}`,
+            node_type: (n.node_type as FlowNode["node_type"]) || "executor",
+            kind: (n.kind as string) || "unknown",
+            config: (n.config as Record<string, unknown>) || {},
+            position: pos && typeof pos.x === "number" && typeof pos.y === "number"
+              ? { x: pos.x, y: pos.y }
+              : { x: 300 * i, y: 100 },
+            label: (n.label as string) || (n.kind as string) || `Node ${i + 1}`,
+          };
+        });
+
+        // Normalize edges — handle "auto" string or missing
+        if (Array.isArray(data.edges)) {
+          edges = (data.edges as Record<string, unknown>[]).map((e, i) => ({
+            id: (e.id as string) || `edge-${i}`,
+            source: e.source as string,
+            target: e.target as string,
+          }));
+        } else {
+          edges = autoWireEdges(nodes);
+        }
+      } else {
+        // --- Template format: { trigger: {...}, sources: [...], executors: [...], sinks: [...] } ---
+        // Convert to flat nodes array with auto-layout.
+        nodes = [];
+        let idx = 0;
+
+        // Trigger (single object)
+        if (data.trigger && typeof data.trigger === "object") {
+          const t = data.trigger as Record<string, unknown>;
+          nodes.push({
+            id: `node-${idx}`,
+            node_type: "trigger",
+            kind: (t.kind as string) || "manual",
+            config: (t.config as Record<string, unknown>) || {},
+            position: { x: 0, y: 0 }, // positioned below
+            label: (t.label as string) || `Trigger: ${(t.kind as string) || "manual"}`,
+          });
+          idx++;
+        }
+
+        // Sources
+        const sources = Array.isArray(data.sources) ? data.sources as Record<string, unknown>[] : [];
+        for (const s of sources) {
+          nodes.push({
+            id: `node-${idx}`,
+            node_type: "source",
+            kind: (s.kind as string) || "unknown",
+            config: (s.config as Record<string, unknown>) || {},
+            position: { x: 0, y: 0 },
+            label: (s.label as string) || `Source: ${(s.kind as string) || "unknown"}`,
+          });
+          idx++;
+        }
+
+        // Filters (treated as source nodes for display)
+        const filters = Array.isArray(data.filters) ? data.filters as Record<string, unknown>[] : [];
+        for (const f of filters) {
+          nodes.push({
+            id: `node-${idx}`,
+            node_type: "source",
+            kind: (f.kind as string) || "keyword",
+            config: (f.config as Record<string, unknown>) || {},
+            position: { x: 0, y: 0 },
+            label: (f.label as string) || `Filter: ${(f.kind as string) || "keyword"}`,
+          });
+          idx++;
+        }
+
+        // Executors
+        const executors = Array.isArray(data.executors) ? data.executors as Record<string, unknown>[] : [];
+        for (const e of executors) {
+          nodes.push({
+            id: `node-${idx}`,
+            node_type: "executor",
+            kind: (e.kind as string) || "claude-code",
+            config: (e.config as Record<string, unknown>) || {},
+            position: { x: 0, y: 0 },
+            label: (e.label as string) || `Executor: ${(e.kind as string) || "claude-code"}`,
+          });
+          idx++;
+        }
+
+        // Sinks
+        const sinks = Array.isArray(data.sinks) ? data.sinks as Record<string, unknown>[] : [];
+        for (const s of sinks) {
+          nodes.push({
+            id: `node-${idx}`,
+            node_type: "sink",
+            kind: (s.kind as string) || "unknown",
+            config: (s.config as Record<string, unknown>) || {},
+            position: { x: 0, y: 0 },
+            label: (s.label as string) || `Sink: ${(s.kind as string) || "unknown"}`,
+          });
+          idx++;
+        }
+
+        // Auto-layout horizontally and auto-wire
+        nodes.forEach((n, i) => { n.position = { x: 300 * i, y: 100 }; });
+        edges = autoWireEdges(nodes);
+      }
+
+      const flow: Flow = {
+        id: `wf::${workspace}::${name}`,
+        name: (data.name as string) || name,
+        description: (data.description as string) || "",
+        enabled: false,
+        nodes,
+        edges,
+        version: 0,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      setActiveFlowId(flow.id);
+      initFlow(flow);
+      setSelectedNodeId(null);
+      setEditingWorkflow({ workspace, name });
+    } catch (e) {
+      log("error", `Failed to open workflow ${workspace}/${name}: ${(e as Error).message}`);
+    }
+  }, [initFlow]);
 
   const handleSelectSession = useCallback(async (agentId: string, sessionId: string) => {
     try {
@@ -328,6 +489,43 @@ export default function App() {
         onBackToFlow={handleBackToFlow}
         onSettingsClick={() => setShowSettings(true)}
         onReconnect={handleReconnect}
+        onNavigate={(view) => {
+          setEditingWorkflow(null);
+          setActiveView(view);
+        }}
+        editingWorkflow={editingWorkflow}
+        workspaces={wfWorkspaces}
+        activeWorkspace={wfActiveWorkspace}
+        onSelectWorkspace={(ws) => setWfActiveWorkspace(ws)}
+        onCreateWorkspace={() => setShowNewWorkspace(true)}
+        onSaveWorkflow={editingWorkflow ? async () => {
+          if (!canonicalFlow) return;
+          try {
+            await api.saveWorkflow(editingWorkflow.workspace, editingWorkflow.name, {
+              name: canonicalFlow.name,
+              description: canonicalFlow.description || "",
+              nodes: canonicalFlow.nodes,
+              edges: canonicalFlow.edges,
+            });
+            log("info", `Saved workflow ${editingWorkflow.workspace}/${editingWorkflow.name}`);
+          } catch (e) {
+            log("error", `Save failed: ${(e as Error).message}`);
+          }
+        } : undefined}
+        onPublish={editingWorkflow ? async () => {
+          if (!canonicalFlow) return;
+          try {
+            await api.publishWorkflow(editingWorkflow.workspace, editingWorkflow.name, {
+              name: canonicalFlow.name,
+              description: canonicalFlow.description || "",
+              nodes: canonicalFlow.nodes,
+              edges: canonicalFlow.edges,
+            });
+            log("info", `Published workflow ${editingWorkflow.workspace}/${editingWorkflow.name}`);
+          } catch (e) {
+            log("error", `Publish failed: ${(e as Error).message}`);
+          }
+        } : undefined}
       />
       <div className="app-layout">
         {sidebarCollapsed ? (
@@ -365,11 +563,30 @@ export default function App() {
             nodeTypes={nodeTypes}
             onGrab={handleGrab}
             onCollapse={() => setSidebarCollapsed(true)}
-
+            activeWorkspace={wfActiveWorkspace}
+            workflows={wfWorkflows}
+            onSelectWorkflow={openWorkflow}
+            onCreateWorkflow={() => setNewWorkflowTrigger((n) => n + 1)}
+            onDeleteWorkflow={async (workspace, name) => {
+              if (!confirm(`Delete workflow "${name}"?`)) return;
+              try {
+                await api.deleteWorkflow(workspace, name);
+                // Remove from local state immediately
+                setWfWorkflows((prev) => prev.filter((wf) => !(wf.workspace === workspace && wf.name === name)));
+                // If we were editing this workflow, go back to the workflows list
+                if (editingWorkflow?.workspace === workspace && editingWorkflow?.name === name) {
+                  setEditingWorkflow(null);
+                  setActiveFlowId(null);
+                }
+              } catch (e) {
+                console.error("Failed to delete workflow:", e);
+              }
+            }}
+            editingWorkflow={editingWorkflow}
           />
         )}
 
-        <div style={{ display: activeView === "flow-editor" ? "contents" : "none" }}>
+        <div style={{ display: activeView === "flow-editor" || editingWorkflow ? "contents" : "none" }}>
           <FlowWorkspaceView
             flowId={activeFlowId}
             canonicalFlow={canonicalFlow}
@@ -427,6 +644,19 @@ export default function App() {
             />
           </div>
         ))}
+
+        <div style={{ display: activeView === "workflows" && !editingWorkflow ? "contents" : "none" }}>
+          <WorkflowsView
+            onOpenWorkflow={openWorkflow}
+            activeWorkspace={wfActiveWorkspace}
+            onSelectWorkspace={(ws) => setWfActiveWorkspace(ws)}
+            onWorkflowsChanged={(workspaces, workflows) => {
+              setWfWorkspaces(workspaces);
+              setWfWorkflows(workflows);
+            }}
+            newWorkflowTrigger={newWorkflowTrigger}
+          />
+        </div>
       </div>
 
       <Dialog open={showSettings} onOpenChange={setShowSettings}>
@@ -453,6 +683,16 @@ export default function App() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <CreateWorkspaceDialog
+        open={showNewWorkspace}
+        onOpenChange={setShowNewWorkspace}
+        onCreated={(name) => {
+          setWfWorkspaces((prev) => [...prev, name].sort());
+          setWfActiveWorkspace(name);
+        }}
+      />
+
     </div>
   );
 }

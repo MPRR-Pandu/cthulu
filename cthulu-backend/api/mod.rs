@@ -1,6 +1,8 @@
 pub mod agents;
 pub mod auth;
 pub mod changes;
+pub mod cloud;
+pub mod error;
 pub mod flows;
 pub mod hooks;
 
@@ -8,7 +10,10 @@ pub mod middleware;
 pub mod prompts;
 mod routes;
 pub mod scheduler;
+pub mod secrets;
 pub mod templates;
+pub mod validation;
+pub mod workflows;
 
 use axum::Router;
 use serde::{Deserialize, Serialize};
@@ -303,6 +308,8 @@ pub struct AppState {
     pub data_dir: PathBuf,
     /// Path to the `static/` directory (template YAML files live in `static/workflows/`).
     pub static_dir: PathBuf,
+    /// In-memory cache of template metadata, loaded once at startup.
+    pub template_cache: Arc<tokio::sync::RwLock<Vec<crate::templates::TemplateMetadata>>>,
     /// Persistent Claude CLI processes keyed by session key (flow_id::node_id).
     pub live_processes: Arc<Mutex<HashMap<String, LiveClaudeProcess>>>,
     /// Sandbox provider for isolated executor runs.
@@ -331,6 +338,18 @@ pub struct AppState {
     pub global_hook_tx: Arc<broadcast::Sender<String>>,
     /// The port the server is listening on (used in hook URLs).
     pub server_port: u16,
+    /// GitHub Personal Access Token for workflows repo operations.
+    pub github_pat: Arc<RwLock<Option<String>>>,
+    /// Path to `~/.cthulu/secrets.json`.
+    pub secrets_path: PathBuf,
+    /// Allowed CORS origins (empty = allow any).
+    pub cors_origins: Vec<String>,
+    /// Server environment (local, staging, production).
+    pub environment: String,
+    /// Cloud VM pool for remote agent execution (None if VM_MANAGER_URL not configured).
+    pub vm_pool: Option<std::sync::Arc<crate::cloud::VmPool>>,
+    /// A2A protocol client for communicating with cloud agent servers.
+    pub a2a_client: std::sync::Arc<crate::cloud::A2aClient>,
 }
 
 impl AppState {

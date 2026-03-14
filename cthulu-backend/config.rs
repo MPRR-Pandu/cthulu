@@ -49,13 +49,9 @@ impl Config {
             .map(|s| s.split(',').map(|o| o.trim().to_string()).collect())
             .unwrap_or_default();
 
-        let rate_limit_rps = rate_limit_rps
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(10);
+        let rate_limit_rps = rate_limit_rps.and_then(|v| v.parse().ok()).unwrap_or(10);
 
-        let rate_limit_burst = rate_limit_burst
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(50);
+        let rate_limit_burst = rate_limit_burst.and_then(|v| v.parse().ok()).unwrap_or(50);
 
         Config {
             port,
@@ -139,6 +135,10 @@ pub enum SinkConfig {
         token_env: String,
         database_id: String,
     },
+    Telegram {
+        bot_token_env: Option<String>,
+        chat_id: String,
+    },
 }
 
 #[cfg(test)]
@@ -165,7 +165,8 @@ mod tests {
 
     #[test]
     fn test_config_present_sentry_dsn() {
-        let config = Config::from_raw_values(None, Some("https://sentry.io/123"), None, None, None, None);
+        let config =
+            Config::from_raw_values(None, Some("https://sentry.io/123"), None, None, None, None);
         assert_eq!(config.sentry_dsn.as_deref(), Some("https://sentry.io/123"));
     }
 
@@ -183,8 +184,18 @@ mod tests {
 
     #[test]
     fn test_config_cors_origins() {
-        let config = Config::from_raw_values(None, None, None, Some("http://localhost:5173, http://localhost:8081"), None, None);
-        assert_eq!(config.cors_origins, vec!["http://localhost:5173", "http://localhost:8081"]);
+        let config = Config::from_raw_values(
+            None,
+            None,
+            None,
+            Some("http://localhost:5173, http://localhost:8081"),
+            None,
+            None,
+        );
+        assert_eq!(
+            config.cors_origins,
+            vec!["http://localhost:5173", "http://localhost:8081"]
+        );
     }
 
     #[test]

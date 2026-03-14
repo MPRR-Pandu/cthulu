@@ -130,6 +130,7 @@ struct JsonRpcError {
     code: i64,
     message: String,
     #[serde(default)]
+    #[allow(dead_code)]
     data: Option<Value>,
 }
 

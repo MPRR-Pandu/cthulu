@@ -6,7 +6,6 @@
 //! After the run completes, the VM is released back to idle.
 
 use anyhow::{Context, Result};
-use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -40,6 +39,7 @@ pub struct VmPool {
     client: VmManagerClient,
     /// Host IP/hostname of the VM Manager (used to construct A2A URLs).
     host: String,
+    #[allow(dead_code)]
     pool_size: usize,
     pool: RwLock<Vec<PoolVm>>,
 }

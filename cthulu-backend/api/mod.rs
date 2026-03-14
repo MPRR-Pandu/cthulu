@@ -336,8 +336,11 @@ pub struct AppState {
     /// Global broadcast channel for hook events (permissions, file changes, stop).
     /// Single channel — frontend subscribes once at App mount. Works across all sessions.
     pub global_hook_tx: Arc<broadcast::Sender<String>>,
-    /// The port the server is listening on (used in hook URLs).
+    /// The port the server is listening on (used in hook URLs for HTTP mode).
     pub server_port: u16,
+    /// Path to a Unix domain socket for hook IPC (desktop mode).
+    /// When set, command-type hooks use this socket instead of HTTP.
+    pub hook_socket_path: Option<PathBuf>,
     /// GitHub Personal Access Token for workflows repo operations.
     pub github_pat: Arc<RwLock<Option<String>>>,
     /// Path to `~/.cthulu/secrets.json`.
@@ -350,6 +353,13 @@ pub struct AppState {
     pub vm_pool: Option<std::sync::Arc<crate::cloud::VmPool>>,
     /// A2A protocol client for communicating with cloud agent servers.
     pub a2a_client: std::sync::Arc<crate::cloud::A2aClient>,
+    /// Heartbeat scheduler for autonomous agent runs.
+    pub heartbeat_scheduler: Arc<RwLock<crate::agents::heartbeat::HeartbeatScheduler>>,
+    /// File-based task store for agent assignments.
+    pub task_store: Arc<crate::agents::tasks::TaskFileStore>,
+    /// Self-write guard for workflow YAML files — prevents re-fetch loops
+    /// when the UI saves a workflow and the file watcher detects the change.
+    pub workflow_self_writes: Arc<crate::watcher::WorkflowSelfWrites>,
 }
 
 impl AppState {

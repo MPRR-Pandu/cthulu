@@ -1,10 +1,10 @@
 use axum::extract::{Path, State};
 use axum::Json;
+use base64::Engine;
 use hyper::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::path::PathBuf;
-use tokio::process::Command;
 
 use crate::api::AppState;
 
@@ -13,15 +13,6 @@ const REPO_NAME: &str = "cthulu-workflows";
 /// Helper: get the local clone path (~/.cthulu/cthulu-workflows).
 fn clone_dir(state: &AppState) -> PathBuf {
     state.data_dir.join(REPO_NAME)
-}
-
-/// Build the authenticated remote URL using basic auth (x-access-token).
-/// This is the format GitHub supports for both classic and fine-grained PATs.
-fn auth_remote_url(pat: &str, owner: &str) -> String {
-    format!(
-        "https://x-access-token:{}@github.com/{}/{}.git",
-        pat, owner, REPO_NAME
-    )
 }
 
 /// Helper: require the PAT or return 401.
@@ -46,60 +37,322 @@ fn read_owner(state: &AppState) -> Option<String> {
     v["workspace_repo"]["owner"].as_str().map(String::from)
 }
 
-/// Run a git command in the clone directory, returning stdout on success.
-/// If `pat` and `owner` are provided, the remote origin URL is updated first
-/// to ensure the current PAT is used for authentication.
-async fn git(
-    clone: &PathBuf,
-    args: &[&str],
-    auth: Option<(&str, &str)>, // (pat, owner)
-) -> Result<String, (StatusCode, Json<serde_json::Value>)> {
-    // Before any network operation (push/pull/fetch), update the remote URL
-    // with the current PAT so credentials are never stale.
-    if let Some((pat, owner)) = auth {
-        let needs_auth = args.first().map_or(false, |cmd| {
-            matches!(*cmd, "pull" | "push" | "fetch")
-        });
-        if needs_auth {
-            let url = auth_remote_url(pat, owner);
-            let set_url = Command::new("git")
-                .args(["remote", "set-url", "origin", &url])
-                .current_dir(clone)
-                .output()
-                .await;
-            if let Err(e) = set_url {
-                tracing::warn!(error = %e, "failed to update remote URL");
+// ---------------------------------------------------------------------------
+// GitHub REST API helpers (replace git CLI usage)
+// ---------------------------------------------------------------------------
+
+/// Fetch file/directory contents from GitHub via the Contents API.
+/// Returns the parsed JSON response.
+async fn github_contents(
+    client: &reqwest::Client,
+    pat: &str,
+    owner: &str,
+    path: &str,
+) -> Result<serde_json::Value, (StatusCode, Json<serde_json::Value>)> {
+    let url = if path.is_empty() {
+        format!(
+            "https://api.github.com/repos/{}/{}/contents",
+            owner, REPO_NAME
+        )
+    } else {
+        format!(
+            "https://api.github.com/repos/{}/{}/contents/{}",
+            owner, REPO_NAME, path
+        )
+    };
+
+    let resp = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", pat))
+        .header("User-Agent", "cthulu-studio")
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, url = %url, "GitHub Contents API request failed");
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({"error": format!("GitHub API error: {e}")})),
+            )
+        })?;
+
+    let status = resp.status();
+    if !status.is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        tracing::warn!(status = %status, path = %path, body = %body, "GitHub Contents API returned error");
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            Json(json!({"error": format!("GitHub Contents API error ({}): {}", status, body)})),
+        ));
+    }
+
+    resp.json::<serde_json::Value>().await.map_err(|e| {
+        (
+            StatusCode::BAD_GATEWAY,
+            Json(json!({"error": format!("Failed to parse GitHub Contents response: {e}")})),
+        )
+    })
+}
+
+/// Create or update a single file on GitHub via the Contents API.
+/// Automatically fetches the current SHA if the file already exists (needed for updates).
+async fn github_put_file(
+    client: &reqwest::Client,
+    pat: &str,
+    owner: &str,
+    path: &str,
+    content: &[u8],
+    message: &str,
+) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/contents/{}",
+        owner, REPO_NAME, path
+    );
+
+    // Check if file already exists to get its SHA (required for updates)
+    let existing_sha = {
+        let check = client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", pat))
+            .header("User-Agent", "cthulu-studio")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await;
+
+        match check {
+            Ok(resp) if resp.status().is_success() => {
+                let body: serde_json::Value = resp.json().await.unwrap_or_default();
+                body["sha"].as_str().map(String::from)
+            }
+            _ => None,
+        }
+    };
+
+    // Base64-encode the content
+    let encoded = base64::engine::general_purpose::STANDARD.encode(content);
+
+    let mut body = json!({
+        "message": message,
+        "content": encoded,
+    });
+
+    if let Some(sha) = existing_sha {
+        body["sha"] = json!(sha);
+    }
+
+    let resp = client
+        .put(&url)
+        .header("Authorization", format!("Bearer {}", pat))
+        .header("User-Agent", "cthulu-studio")
+        .header("Accept", "application/vnd.github+json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, path = %path, "GitHub PUT file request failed");
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({"error": format!("GitHub API error: {e}")})),
+            )
+        })?;
+
+    let status = resp.status();
+    if !status.is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        tracing::warn!(status = %status, path = %path, body = %body, "GitHub PUT file returned error");
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            Json(json!({"error": format!("GitHub PUT file error ({}): {}", status, body)})),
+        ));
+    }
+
+    Ok(())
+}
+
+/// Delete a file from GitHub via the Contents API.
+async fn github_delete_file(
+    client: &reqwest::Client,
+    pat: &str,
+    owner: &str,
+    path: &str,
+    message: &str,
+) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/contents/{}",
+        owner, REPO_NAME, path
+    );
+
+    // First GET the file to obtain its SHA (required for deletion)
+    let resp = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", pat))
+        .header("User-Agent", "cthulu-studio")
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({"error": format!("GitHub API error: {e}")})),
+            )
+        })?;
+
+    if !resp.status().is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            Json(json!({"error": format!("Failed to get file for deletion: {}", body)})),
+        ));
+    }
+
+    let file_info: serde_json::Value = resp.json().await.map_err(|e| {
+        (
+            StatusCode::BAD_GATEWAY,
+            Json(json!({"error": format!("Failed to parse file info: {e}")})),
+        )
+    })?;
+
+    let sha = file_info["sha"].as_str().ok_or_else(|| {
+        (
+            StatusCode::BAD_GATEWAY,
+            Json(json!({"error": "GitHub file response missing sha field"})),
+        )
+    })?;
+
+    // DELETE the file
+    let del_resp = client
+        .delete(&url)
+        .header("Authorization", format!("Bearer {}", pat))
+        .header("User-Agent", "cthulu-studio")
+        .header("Accept", "application/vnd.github+json")
+        .json(&json!({
+            "message": message,
+            "sha": sha,
+        }))
+        .send()
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({"error": format!("GitHub DELETE error: {e}")})),
+            )
+        })?;
+
+    let del_status = del_resp.status();
+    if !del_status.is_success() {
+        let body = del_resp.text().await.unwrap_or_default();
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            Json(json!({"error": format!("GitHub DELETE file error ({}): {}", del_status, body)})),
+        ));
+    }
+
+    Ok(())
+}
+
+/// Recursively sync the GitHub repo contents to the local directory.
+/// Downloads all files via the Contents API and mirrors the directory structure.
+async fn sync_repo_to_local(
+    client: &reqwest::Client,
+    pat: &str,
+    owner: &str,
+    local_root: &std::path::Path,
+) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
+    sync_repo_path(client, pat, owner, local_root, "").await
+}
+
+/// Recursive helper for sync_repo_to_local.
+async fn sync_repo_path(
+    client: &reqwest::Client,
+    pat: &str,
+    owner: &str,
+    local_root: &std::path::Path,
+    repo_path: &str,
+) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
+    let contents = github_contents(client, pat, owner, repo_path).await?;
+
+    let entries = match contents.as_array() {
+        Some(arr) => arr.clone(),
+        None => {
+            // Single file response (shouldn't happen for root, but handle gracefully)
+            vec![contents]
+        }
+    };
+
+    for entry in &entries {
+        let name = match entry["name"].as_str() {
+            Some(n) => n,
+            None => continue,
+        };
+
+        // Skip hidden entries (like .git)
+        if name.starts_with('.') {
+            continue;
+        }
+
+        let entry_type = entry["type"].as_str().unwrap_or("");
+        let entry_path = entry["path"].as_str().unwrap_or(name);
+
+        match entry_type {
+            "dir" => {
+                let local_dir = local_root.join(entry_path);
+                let _ = std::fs::create_dir_all(&local_dir);
+                // Recurse into subdirectory
+                Box::pin(sync_repo_path(client, pat, owner, local_root, entry_path)).await?;
+            }
+            "file" => {
+                if let Some(download_url) = entry["download_url"].as_str() {
+                    let local_file = local_root.join(entry_path);
+
+                    // Ensure parent directory exists
+                    if let Some(parent) = local_file.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+
+                    // Download raw file content
+                    let file_resp = client
+                        .get(download_url)
+                        .header("Authorization", format!("Bearer {}", pat))
+                        .header("User-Agent", "cthulu-studio")
+                        .send()
+                        .await
+                        .map_err(|e| {
+                            (
+                                StatusCode::BAD_GATEWAY,
+                                Json(json!({"error": format!("Failed to download {}: {}", entry_path, e)})),
+                            )
+                        })?;
+
+                    if file_resp.status().is_success() {
+                        let bytes = file_resp.bytes().await.map_err(|e| {
+                            (
+                                StatusCode::BAD_GATEWAY,
+                                Json(json!({"error": format!("Failed to read bytes for {}: {}", entry_path, e)})),
+                            )
+                        })?;
+
+                        std::fs::write(&local_file, &bytes).map_err(|e| {
+                            (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                Json(json!({"error": format!("Failed to write {}: {}", entry_path, e)})),
+                            )
+                        })?;
+                    } else {
+                        tracing::warn!(
+                            path = %entry_path,
+                            status = %file_resp.status(),
+                            "failed to download file from GitHub"
+                        );
+                    }
+                }
+            }
+            _ => {
+                tracing::debug!(entry_type = %entry_type, name = %name, "skipping unknown entry type");
             }
         }
     }
 
-    let mut cmd = Command::new("git");
-    cmd.args(args).current_dir(clone);
-
-    let output = cmd.output().await.map_err(|e| {
-        tracing::error!(error = %e, args = ?args, "git command failed to spawn");
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Failed to run git: {e}")})),
-        )
-    })?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-        // Redact any PAT tokens that git may include in error messages
-        let safe_stderr = if let Some((pat, _)) = auth {
-            stderr.replace(pat, "***")
-        } else {
-            stderr.clone()
-        };
-        tracing::warn!(args = ?args, stderr = %safe_stderr, "git command failed");
-        return Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("git {} failed: {}", args.join(" "), safe_stderr)})),
-        ));
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -216,44 +469,11 @@ pub async fn setup_repo(
 
     let repo_url = format!("https://github.com/{}/{}", username, REPO_NAME);
 
-    // 3. Clone or pull
+    // 3. Sync repo contents to local directory via API
     let clone_path = clone_dir(&state);
-    if clone_path.join(".git").exists() {
-        // Already cloned — update remote URL with current PAT, then pull
-        git(&clone_path, &["pull", "--ff-only"], Some((&pat, &username))).await?;
-        tracing::info!("pulled latest from {REPO_NAME}");
-    } else {
-        // Fresh clone — remove stale dir if it exists without .git
-        if clone_path.exists() {
-            let _ = std::fs::remove_dir_all(&clone_path);
-        }
-
-        let parent = clone_path.parent().unwrap();
-        let _ = std::fs::create_dir_all(parent);
-
-        let clone_url = auth_remote_url(&pat, &username);
-        let output = Command::new("git")
-            .args(["clone", &clone_url, clone_path.to_str().unwrap()])
-            .current_dir(parent)
-            .output()
-            .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": format!("git clone failed: {e}")})),
-                )
-            })?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("git clone failed: {stderr}")})),
-            ));
-        }
-
-        tracing::info!("cloned {REPO_NAME} to {}", clone_path.display());
-    }
+    let _ = std::fs::create_dir_all(&clone_path);
+    sync_repo_to_local(&state.http_client, &pat, &username, &clone_path).await?;
+    tracing::info!("synced {REPO_NAME} to {}", clone_path.display());
 
     // 4. Save repo config to secrets.json
     {
@@ -384,16 +604,16 @@ pub async fn create_workspace(
     let gitkeep = workspace_dir.join(".gitkeep");
     let _ = std::fs::write(&gitkeep, "");
 
-    // Git add, commit, push
-    let auth = Some((pat.as_str(), owner.as_str()));
-    git(&clone_path, &["add", "."], auth).await?;
-    git(
-        &clone_path,
-        &["commit", "-m", &format!("Create workspace: {}", name)],
-        auth,
+    // Push .gitkeep to GitHub via API
+    github_put_file(
+        &state.http_client,
+        &pat,
+        &owner,
+        &format!("{name}/.gitkeep"),
+        b"",
+        &format!("Create workspace: {name}"),
     )
     .await?;
-    git(&clone_path, &["push"], auth).await?;
 
     tracing::info!(workspace = %name, "created workspace and pushed");
 
@@ -827,20 +1047,16 @@ pub async fn publish_workflow(
         )
     })?;
 
-    // Git add, commit, push
-    let auth = Some((pat.as_str(), owner.as_str()));
-    git(&clone_path, &["add", "."], auth).await?;
-    git(
-        &clone_path,
-        &[
-            "commit",
-            "-m",
-            &format!("Publish {}/{}", workspace, name),
-        ],
-        auth,
+    // Push workflow.yaml to GitHub via API
+    github_put_file(
+        &state.http_client,
+        &pat,
+        &owner,
+        &format!("{workspace}/{name}/workflow.yaml"),
+        yaml.as_bytes(),
+        &format!("Publish {workspace}/{name}"),
     )
     .await?;
-    git(&clone_path, &["push"], auth).await?;
 
     tracing::info!(workspace = %workspace, workflow = %name, "published workflow");
 
@@ -888,20 +1104,25 @@ pub async fn delete_workflow(
         )
     })?;
 
-    // Git add, commit, push
-    let auth = Some((pat.as_str(), owner.as_str()));
-    git(&clone_path, &["add", "."], auth).await?;
-    git(
-        &clone_path,
-        &[
-            "commit",
-            "-m",
-            &format!("Delete {}/{}", workspace, name),
-        ],
-        auth,
+    // Delete workflow.yaml from GitHub via API
+    github_delete_file(
+        &state.http_client,
+        &pat,
+        &owner,
+        &format!("{workspace}/{name}/workflow.yaml"),
+        &format!("Delete {workspace}/{name}"),
     )
     .await?;
-    git(&clone_path, &["push"], auth).await?;
+
+    // Also try to delete .gitkeep if it exists in the workflow dir
+    let _ = github_delete_file(
+        &state.http_client,
+        &pat,
+        &owner,
+        &format!("{workspace}/{name}/.gitkeep"),
+        &format!("Clean up {workspace}/{name}"),
+    )
+    .await;
 
     tracing::info!(workspace = %workspace, workflow = %name, "deleted workflow");
 
@@ -932,7 +1153,8 @@ pub async fn sync_workflows(
         ));
     }
 
-    git(&clone_path, &["pull", "--ff-only"], Some((&pat, &owner))).await?;
+    // Sync from GitHub via API
+    sync_repo_to_local(&state.http_client, &pat, &owner, &clone_path).await?;
 
     // Re-list workspaces
     let mut workspaces = Vec::new();

@@ -11,7 +11,7 @@
  *  - "Use Template" one-click import
  */
 import { useState, useEffect, useRef, useMemo, useCallback, useDeferredValue } from "react";
-import { listTemplates, importTemplate, importYaml, importFromGithub, getServerUrl } from "../api/client";
+import { listTemplates, importTemplate, importYaml, importFromGithub } from "../api/client";
 import type { TemplateMetadata, Flow } from "../types/flow";
 import MiniFlowDiagram from "./MiniFlowDiagram";
 

@@ -1,10 +1,13 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo, useDeferredValue } from "react";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import * as api from "../api/client";
 import type { WorkflowSummary, TemplateMetadata } from "../types/flow";
 import GitHubPatDialog from "./GitHubPatDialog";
 import CreateWorkflowDialog from "./CreateWorkflowDialog";
 import TemplateGallery from "./TemplateGallery";
+import { useWorkflowContext } from "../contexts/WorkflowContext";
+import { Search, X } from "lucide-react";
 
 interface WorkflowsViewProps {
   onOpenWorkflow: (workspace: string, name: string) => void;
@@ -32,6 +35,34 @@ export default function WorkflowsView({ onOpenWorkflow, onWorkflowsChanged, newW
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateMetadata | null>(null);
   const [cachedTemplates, setCachedTemplates] = useState<TemplateMetadata[] | undefined>(undefined);
 
+  // Shared state from WorkflowContext
+  const { toggleWorkflowEnabled, isWorkflowEnabled, workflowSearch, setWorkflowSearch } = useWorkflowContext();
+  const deferredSearch = useDeferredValue(workflowSearch);
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  const filteredWorkflows = useMemo(() => {
+    const q = deferredSearch.trim().toLowerCase();
+    if (!q) return workflows;
+    return workflows.filter((wf) =>
+      wf.name.toLowerCase().includes(q) ||
+      (wf.description && wf.description.toLowerCase().includes(q))
+    );
+  }, [workflows, deferredSearch]);
+
+  const handleToggleEnabled = (e: React.MouseEvent, ws: string, name: string) => {
+    e.stopPropagation();
+    toggleWorkflowEnabled(ws, name);
+  };
+
+  const handleRun = async (e: React.MouseEvent, ws: string, name: string) => {
+    e.stopPropagation();
+    try {
+      await api.runWorkflow(ws, name);
+    } catch (err) {
+      console.error(`[WorkflowsView] Run workflow failed: ${ws}/${name}`, err);
+    }
+  };
+
   useEffect(() => {
     api.getGithubPatStatus()
       .then((res) => setPatConfigured(res.configured))
@@ -49,8 +80,8 @@ export default function WorkflowsView({ onOpenWorkflow, onWorkflowsChanged, newW
       if (res.workspaces.length > 0) {
         onSelectWorkspace?.(res.workspaces[0]);
       }
-    } catch (e) {
-      setError((e as Error).message);
+    } catch (e: unknown) {
+      setError(typeof e === "string" ? e : (e instanceof Error ? e.message : String(e)));
     } finally {
       setSetting(false);
     }
@@ -87,7 +118,13 @@ export default function WorkflowsView({ onOpenWorkflow, onWorkflowsChanged, newW
   }, [repoReady, cachedTemplates]);
 
   // Sync state to parent so sidebar stays up to date
+  // Skip initial render (workspaces=[]) to avoid clobbering eagerly loaded data
+  const hasMountedRef = useRef(false);
   useEffect(() => {
+    if (!hasMountedRef.current) {
+      hasMountedRef.current = true;
+      if (workspaces.length === 0) return; // skip initial empty sync
+    }
     onWorkflowsChanged?.(workspaces, workflows);
   }, [workspaces, workflows, onWorkflowsChanged]);
 
@@ -173,6 +210,26 @@ export default function WorkflowsView({ onOpenWorkflow, onWorkflowsChanged, newW
   return (
     <div className="workflows-view">
       <div className="workflows-toolbar">
+        <div className="wf-search">
+          <Search size={14} className="wf-search-icon" />
+          <input
+            ref={searchRef}
+            className="wf-search-input"
+            type="text"
+            placeholder="Search workflows..."
+            value={workflowSearch}
+            onChange={(e) => setWorkflowSearch(e.target.value)}
+          />
+          {workflowSearch && (
+            <button
+              className="wf-search-clear"
+              onClick={() => { setWorkflowSearch(""); searchRef.current?.focus(); }}
+              aria-label="Clear search"
+            >
+              <X size={12} />
+            </button>
+          )}
+        </div>
         <div className="spacer" />
         <Button
           variant="ghost"
@@ -185,22 +242,46 @@ export default function WorkflowsView({ onOpenWorkflow, onWorkflowsChanged, newW
       </div>
 
       <div className="workflow-grid">
-        {workflows.map((wf) => (
-          <div
-            key={wf.name}
-            className="workflow-card"
-            onClick={() => onOpenWorkflow(wf.workspace, wf.name)}
-          >
-            <div className="workflow-card-name">{wf.name}</div>
-            {wf.description && (
-              <div className="workflow-card-desc">{wf.description}</div>
-            )}
-            <div className="workflow-card-meta">
-              {wf.node_count} node{wf.node_count !== 1 ? "s" : ""}
+        {filteredWorkflows.map((wf) => {
+          const isEnabled = isWorkflowEnabled(wf.workspace, wf.name);
+          return (
+            <div
+              key={wf.name}
+              className={`workflow-card${isEnabled ? " workflow-card-active" : ""}`}
+              onClick={() => onOpenWorkflow(wf.workspace, wf.name)}
+            >
+              <div className="workflow-card-controls">
+                <Switch
+                  checked={isEnabled}
+                  onClick={(e) => handleToggleEnabled(e, wf.workspace, wf.name)}
+                  className="data-[state=checked]:bg-[var(--success)]"
+                />
+                <Button
+                  size="xs"
+                  variant={isEnabled ? "default" : "ghost"}
+                  onClick={(e) => handleRun(e, wf.workspace, wf.name)}
+                  title={!isEnabled ? "Workflow is inactive — manual run" : "Run workflow"}
+                >
+                  {isEnabled ? "Run" : "Run (Manual)"}
+                </Button>
+              </div>
+              <div className="workflow-card-name">{wf.name}</div>
+              {wf.description && (
+                <div className="workflow-card-desc">{wf.description}</div>
+              )}
+              <div className="workflow-card-meta">
+                <span>{wf.node_count} node{wf.node_count !== 1 ? "s" : ""}</span>
+                {isEnabled && <span className="workflow-active-badge">Active</span>}
+              </div>
             </div>
+          );
+        })}
+        {filteredWorkflows.length === 0 && deferredSearch && (
+          <div className="workflow-card workflow-card-empty">
+            <div className="workflow-card-name">No workflows matching "{deferredSearch}"</div>
           </div>
-        ))}
-        {activeWorkspace && (
+        )}
+        {activeWorkspace && !deferredSearch && (
           <div
             className="workflow-card workflow-card-new"
             onClick={() => setShowTemplateGallery(true)}

@@ -33,8 +33,8 @@ export default function CreateWorkspaceDialog({
       setName("");
       onOpenChange(false);
       onCreated(result.name);
-    } catch (e) {
-      setError((e as Error).message);
+    } catch (e: unknown) {
+      setError(typeof e === "string" ? e : (e instanceof Error ? e.message : String(e)));
     } finally {
       setCreating(false);
     }

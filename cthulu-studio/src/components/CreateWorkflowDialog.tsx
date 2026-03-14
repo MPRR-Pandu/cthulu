@@ -58,8 +58,8 @@ export default function CreateWorkflowDialog({
       setName("");
       onOpenChange(false);
       onCreated(workspace, trimmed);
-    } catch (e) {
-      setError((e as Error).message);
+    } catch (e: unknown) {
+      setError(typeof e === "string" ? e : (e instanceof Error ? e.message : String(e)));
     } finally {
       setCreating(false);
     }

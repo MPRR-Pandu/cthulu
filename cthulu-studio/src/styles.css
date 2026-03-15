@@ -7950,3 +7950,40 @@ button:active:not(:disabled),
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* Cloud Indicator */
+.cloud-indicator {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  border: 1px solid var(--border);
+}
+
+.cloud-indicator.connected {
+  color: #22c55e;
+  border-color: rgba(34, 197, 94, 0.3);
+  background: rgba(34, 197, 94, 0.1);
+}
+
+.cloud-indicator.disconnected {
+  color: var(--text-secondary);
+  border-color: var(--border);
+  background: var(--bg-secondary);
+}
+
+.cloud-indicator.loading {
+  color: var(--accent);
+  border-color: rgba(var(--accent-rgb, 99, 102, 241), 0.3);
+  animation: cloud-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes cloud-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}

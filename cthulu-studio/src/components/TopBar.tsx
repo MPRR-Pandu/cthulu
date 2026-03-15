@@ -17,6 +17,7 @@ import { themes } from "@/lib/themes";
 import type { ActiveView } from "../types/flow";
 import { listen } from "@tauri-apps/api/event";
 import { ChevronDown, Search, X, Check, Settings } from "lucide-react";
+import CloudIndicator from "./CloudIndicator";
 
 function formatRelativeTime(iso: string): string {
   const now = Date.now();
@@ -354,6 +355,7 @@ export default function TopBar({
         </button>
       )}
 
+      <CloudIndicator />
       <ThemeSelector />
     </div>
   );

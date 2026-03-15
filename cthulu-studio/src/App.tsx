@@ -14,6 +14,7 @@ import { AgentListPage } from "./components/AgentListPage";
 import { AgentDetailPage } from "./components/AgentDetailPage";
 import OrgChart from "./components/OrgChart";
 import CreateWorkspaceDialog from "./components/CreateWorkspaceDialog";
+import SettingsPage from "./components/SettingsPage";
 import { useGlobalPermissions } from "./hooks/useGlobalPermissions";
 import { type CanvasHandle } from "./components/Canvas";
 import type { NodeTypeSchema } from "./types/flow";
@@ -174,21 +175,6 @@ import { RunProvider, useRunContext } from "./contexts/RunContext";
 import { WorkflowProvider, useWorkflowContext } from "./contexts/WorkflowContext";
 import ConfirmDialog, { useConfirm } from "./components/ConfirmDialog";
 
-/** Placeholder for the settings page (wired up in a later task). */
-function SettingsPlaceholder() {
-  return (
-    <div style={{
-      flex: 1,
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      color: "var(--text-secondary)",
-      fontSize: "14px",
-    }}>
-      Settings page coming soon...
-    </div>
-  );
-}
 
 /**
  * Inner component that consumes all contexts.
@@ -772,7 +758,7 @@ function AppInner() {
           />
         </div>
 
-        {activeView === "settings" && <SettingsPlaceholder />}
+        {activeView === "settings" && <SettingsPage />}
       </div>
 
       <CreateWorkspaceDialog

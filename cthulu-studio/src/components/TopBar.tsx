@@ -168,13 +168,6 @@ export default function TopBar({
         >
           Workflows
         </button>
-        <button
-          className={`top-bar-nav-item${activeView === "settings" ? " active" : ""}`}
-          onClick={() => onNavigate?.("settings")}
-        >
-          <Settings size={14} />
-          Settings
-        </button>
       </div>
 
       {activeView === "workflows" && !editingWorkflow && (
@@ -357,6 +350,13 @@ export default function TopBar({
 
       <CloudIndicator />
       <ThemeSelector />
+      <button
+        className={`top-bar-nav-item${activeView === "settings" ? " active" : ""}`}
+        onClick={() => onNavigate?.("settings")}
+        title="Settings"
+      >
+        <Settings size={16} />
+      </button>
     </div>
   );
 }

@@ -167,6 +167,7 @@ export function convertWorkflowDataToFlow(
 
 
 import { UIProvider, useUI } from "./contexts/UIContext";
+import { CloudProvider } from "./contexts/CloudContext";
 import { NavigationProvider, useNavigation } from "./contexts/NavigationContext";
 import { FlowProvider, useFlowContext } from "./contexts/FlowContext";
 import { RunProvider, useRunContext } from "./contexts/RunContext";
@@ -844,13 +845,15 @@ export default function App() {
 
   return (
     <UIProvider>
-      <OrgProvider>
-        <NavigationProvider>
-          <FlowProvider>
-            <AppWithRunProvider />
-          </FlowProvider>
-        </NavigationProvider>
-      </OrgProvider>
+      <CloudProvider>
+        <OrgProvider>
+          <NavigationProvider>
+            <FlowProvider>
+              <AppWithRunProvider />
+            </FlowProvider>
+          </NavigationProvider>
+        </OrgProvider>
+      </CloudProvider>
     </UIProvider>
   );
 }

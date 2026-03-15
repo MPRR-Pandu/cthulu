@@ -171,6 +171,9 @@ fn main() {
             commands::cloud::cloud_pool_status,
             commands::cloud::cloud_pool_health,
             commands::cloud::cloud_test_agent,
+            // Cloud API (cthulu-cloud integration)
+            commands::secrets::save_cloud_config,
+            commands::secrets::get_cloud_config,
             // PTY
             commands::pty::spawn_pty,
             commands::pty::write_pty,

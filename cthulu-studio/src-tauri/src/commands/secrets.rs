@@ -291,3 +291,87 @@ pub async fn save_telegram_credentials(
         ],
     )
 }
+
+// ---------------------------------------------------------------------------
+// Save Cloud config (cloud_url + cloud_enabled)
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct SaveCloudConfigRequest {
+    cloud_url: String,
+    cloud_enabled: bool,
+}
+
+#[tauri::command]
+pub async fn save_cloud_config(
+    state: tauri::State<'_, AppState>,
+    ready: tauri::State<'_, crate::ReadySignal>,
+    request: SaveCloudConfigRequest,
+) -> Result<Value, String> {
+    crate::wait_ready(&ready).await?;
+
+    let secrets_path = &state.secrets_path;
+
+    let mut secrets: Value = if secrets_path.exists() {
+        let content = std::fs::read_to_string(secrets_path).unwrap_or_default();
+        serde_json::from_str(&content).unwrap_or_else(|_| json!({}))
+    } else {
+        if let Some(parent) = secrets_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        json!({})
+    };
+
+    secrets["cloud_url"] = json!(request.cloud_url);
+    secrets["cloud_enabled"] = json!(if request.cloud_enabled { "true" } else { "false" });
+
+    let tmp_path = secrets_path.with_extension("json.tmp");
+    let json_str = serde_json::to_string_pretty(&secrets)
+        .map_err(|e| format!("Failed to serialize secrets: {e}"))?;
+
+    std::fs::write(&tmp_path, &json_str)
+        .map_err(|e| format!("Failed to write secrets file: {e}"))?;
+
+    std::fs::rename(&tmp_path, secrets_path)
+        .map_err(|e| format!("Failed to save secrets file: {e}"))?;
+
+    Ok(json!({ "ok": true }))
+}
+
+// ---------------------------------------------------------------------------
+// Get Cloud config (cloud_url, cloud_enabled, cloud_jwt)
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn get_cloud_config(
+    state: tauri::State<'_, AppState>,
+    ready: tauri::State<'_, crate::ReadySignal>,
+) -> Result<Value, String> {
+    crate::wait_ready(&ready).await?;
+
+    let secrets: Value = std::fs::read_to_string(&state.secrets_path)
+        .ok()
+        .and_then(|content| serde_json::from_str(&content).ok())
+        .unwrap_or_else(|| json!({}));
+
+    let cloud_url = secrets["cloud_url"]
+        .as_str()
+        .unwrap_or("http://localhost:8080")
+        .to_string();
+
+    let cloud_enabled = secrets["cloud_enabled"]
+        .as_str()
+        .map(|s| s == "true")
+        .unwrap_or(false);
+
+    let cloud_jwt = secrets["cloud_jwt"]
+        .as_str()
+        .unwrap_or("")
+        .to_string();
+
+    Ok(json!({
+        "cloud_url": cloud_url,
+        "cloud_enabled": cloud_enabled,
+        "cloud_jwt": cloud_jwt,
+    }))
+}

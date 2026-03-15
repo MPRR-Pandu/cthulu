@@ -3,6 +3,7 @@ pub mod agents;
 pub mod auth;
 pub mod chat;
 pub mod cloud;
+pub mod cloud_api;
 pub mod flows;
 pub mod heartbeat;
 pub mod hooks;

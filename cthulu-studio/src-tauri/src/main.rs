@@ -174,6 +174,12 @@ fn main() {
             // Cloud API (cthulu-cloud integration)
             commands::secrets::save_cloud_config,
             commands::secrets::get_cloud_config,
+            commands::cloud_api::cloud_login,
+            commands::cloud_api::cloud_list_agents,
+            commands::cloud_api::cloud_sync_agent,
+            commands::cloud_api::cloud_submit_task,
+            commands::cloud_api::cloud_list_tasks,
+            commands::cloud_api::cloud_get_task,
             // PTY
             commands::pty::spawn_pty,
             commands::pty::write_pty,

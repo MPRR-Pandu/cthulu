@@ -945,3 +945,28 @@ export async function deleteTask(id: string): Promise<void> {
   log("http", `invoke delete_task id=${id}`);
   await invoke("delete_task", { id });
 }
+
+// ---------------------------------------------------------------------------
+// Cloud Config
+// ---------------------------------------------------------------------------
+
+export interface CloudConfig {
+  cloud_url: string;
+  cloud_enabled: boolean;
+  cloud_jwt: string;
+}
+
+export async function getCloudConfig(): Promise<CloudConfig> {
+  log("http", "invoke get_cloud_config");
+  return invoke<CloudConfig>("get_cloud_config");
+}
+
+export async function saveCloudConfig(
+  cloudUrl: string,
+  cloudEnabled: boolean
+): Promise<{ ok: boolean }> {
+  log("http", `invoke save_cloud_config url=${cloudUrl} enabled=${cloudEnabled}`);
+  return invoke<{ ok: boolean }>("save_cloud_config", {
+    request: { cloud_url: cloudUrl, cloud_enabled: cloudEnabled },
+  });
+}

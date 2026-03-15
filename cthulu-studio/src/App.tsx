@@ -164,14 +164,7 @@ export function convertWorkflowDataToFlow(
   };
 }
 
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
+
 
 import { UIProvider, useUI } from "./contexts/UIContext";
 import { NavigationProvider, useNavigation } from "./contexts/NavigationContext";
@@ -179,6 +172,22 @@ import { FlowProvider, useFlowContext } from "./contexts/FlowContext";
 import { RunProvider, useRunContext } from "./contexts/RunContext";
 import { WorkflowProvider, useWorkflowContext } from "./contexts/WorkflowContext";
 import ConfirmDialog, { useConfirm } from "./components/ConfirmDialog";
+
+/** Placeholder for the settings page (wired up in a later task). */
+function SettingsPlaceholder() {
+  return (
+    <div style={{
+      flex: 1,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      color: "var(--text-secondary)",
+      fontSize: "14px",
+    }}>
+      Settings page coming soon...
+    </div>
+  );
+}
 
 /**
  * Inner component that consumes all contexts.
@@ -191,10 +200,6 @@ function AppInner() {
   const {
     sidebarCollapsed,
     setSidebarCollapsed,
-    showSettings,
-    setShowSettings,
-    serverUrl,
-    setServerUrl,
   } = useUI();
 
   const {
@@ -528,11 +533,6 @@ function AppInner() {
     } catch { /* logged */ }
   };
 
-  const handleSaveSettings = () => {
-    // In desktop mode, server URL is not configurable — we use Tauri IPC
-    setShowSettings(false);
-  };
-
   return (
     <div className="app">
       <TopBar
@@ -543,7 +543,7 @@ function AppInner() {
         onRename={handleRename}
         agentName={selectedAgentName}
         onBackToFlow={handleBackToFlow}
-        onSettingsClick={() => setShowSettings(true)}
+        onSettingsClick={() => {}}
         onReconnect={handleReconnect}
         onNavigate={(view) => {
           setEditingWorkflow(null);
@@ -770,25 +770,9 @@ function AppInner() {
             newWorkflowTrigger={newWorkflowTrigger}
           />
         </div>
-      </div>
 
-      <Dialog open={showSettings} onOpenChange={setShowSettings}>
-        <DialogContent className="bg-[var(--bg-secondary)] border-[var(--border)] text-[var(--text)]">
-          <DialogHeader>
-            <DialogTitle>Settings</DialogTitle>
-          </DialogHeader>
-          <div className="form-group">
-            <p className="text-sm text-[var(--text-secondary)]">
-              Connected via Tauri IPC (desktop mode). No server URL configuration needed.
-            </p>
-          </div>
-          <DialogFooter>
-            <Button onClick={handleSaveSettings}>
-              Close
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        {activeView === "settings" && <SettingsPlaceholder />}
+      </div>
 
       <CreateWorkspaceDialog
         open={showNewWorkspace}

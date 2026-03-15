@@ -16,7 +16,7 @@ import { useTheme } from "@/lib/ThemeContext";
 import { themes } from "@/lib/themes";
 import type { ActiveView } from "../types/flow";
 import { listen } from "@tauri-apps/api/event";
-import { ChevronDown, Search, X, Check } from "lucide-react";
+import { ChevronDown, Search, X, Check, Settings } from "lucide-react";
 
 function formatRelativeTime(iso: string): string {
   const now = Date.now();
@@ -166,6 +166,13 @@ export default function TopBar({
           onClick={() => onNavigate?.("workflows")}
         >
           Workflows
+        </button>
+        <button
+          className={`top-bar-nav-item${activeView === "settings" ? " active" : ""}`}
+          onClick={() => onNavigate?.("settings")}
+        >
+          <Settings size={14} />
+          Settings
         </button>
       </div>
 
@@ -348,10 +355,6 @@ export default function TopBar({
       )}
 
       <ThemeSelector />
-
-      <Button variant="ghost" size="sm" onClick={onSettingsClick}>
-        Settings
-      </Button>
     </div>
   );
 }

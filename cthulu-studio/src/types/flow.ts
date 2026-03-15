@@ -2,7 +2,7 @@ export const STUDIO_ASSISTANT_ID = "studio-assistant";
 
 export type NodeType = "trigger" | "source" | "executor" | "sink";
 
-export type ActiveView = "flow-editor" | "agent-workspace" | "agent-list" | "agent-detail" | "prompt-editor" | "workflows" | "org-chart";
+export type ActiveView = "flow-editor" | "agent-workspace" | "agent-list" | "agent-detail" | "prompt-editor" | "workflows" | "org-chart" | "settings";
 
 export interface Org {
   slug: string;

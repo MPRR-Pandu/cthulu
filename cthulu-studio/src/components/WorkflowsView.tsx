@@ -7,7 +7,23 @@ import GitHubPatDialog from "./GitHubPatDialog";
 import CreateWorkflowDialog from "./CreateWorkflowDialog";
 import TemplateGallery from "./TemplateGallery";
 import { useWorkflowContext } from "../contexts/WorkflowContext";
-import { Search, X } from "lucide-react";
+import { useCloud } from "../contexts/CloudContext";
+import type { CloudWorkflow } from "../api/cloudClient";
+import { Search, X, Cloud, HardDrive } from "lucide-react";
+
+/** Common IANA timezones for the timezone picker */
+const TIMEZONES = [
+  "UTC",
+  "America/New_York",
+  "America/Chicago",
+  "America/Denver",
+  "America/Los_Angeles",
+  "Europe/London",
+  "Europe/Berlin",
+  "Asia/Tokyo",
+  "Asia/Kolkata",
+  "Australia/Sydney",
+];
 
 interface WorkflowsViewProps {
   onOpenWorkflow: (workspace: string, name: string) => void;
@@ -40,6 +56,17 @@ export default function WorkflowsView({ onOpenWorkflow, onWorkflowsChanged, newW
   const deferredSearch = useDeferredValue(workflowSearch);
   const searchRef = useRef<HTMLInputElement>(null);
 
+  // Cloud state
+  const {
+    connected: cloudConnected,
+    cloudWorkflows,
+    refreshCloudWorkflows,
+    createCloudWorkflow,
+    deleteCloudWorkflow,
+    triggerCloudWorkflow,
+    enableCloudWorkflow,
+  } = useCloud();
+
   const filteredWorkflows = useMemo(() => {
     const q = deferredSearch.trim().toLowerCase();
     if (!q) return workflows;
@@ -48,6 +75,16 @@ export default function WorkflowsView({ onOpenWorkflow, onWorkflowsChanged, newW
       (wf.description && wf.description.toLowerCase().includes(q))
     );
   }, [workflows, deferredSearch]);
+
+  const filteredCloudWorkflows = useMemo(() => {
+    const q = deferredSearch.trim().toLowerCase();
+    if (!q) return cloudWorkflows;
+    return cloudWorkflows.filter(
+      (wf) =>
+        wf.name.toLowerCase().includes(q) ||
+        (wf.description && wf.description.toLowerCase().includes(q)),
+    );
+  }, [cloudWorkflows, deferredSearch]);
 
   const handleToggleEnabled = (e: React.MouseEvent, ws: string, name: string) => {
     e.stopPropagation();
@@ -60,6 +97,61 @@ export default function WorkflowsView({ onOpenWorkflow, onWorkflowsChanged, newW
       await api.runWorkflow(ws, name);
     } catch (err) {
       console.error(`[WorkflowsView] Run workflow failed: ${ws}/${name}`, err);
+    }
+  };
+
+  // Cloud workflow actions
+  const handleCloudToggle = async (e: React.MouseEvent, wf: CloudWorkflow) => {
+    e.stopPropagation();
+    try {
+      await enableCloudWorkflow(wf.workflow_id, !wf.enabled);
+    } catch (err) {
+      console.error(`[WorkflowsView] Toggle cloud workflow failed`, err);
+    }
+  };
+
+  const handleCloudRun = async (e: React.MouseEvent, wf: CloudWorkflow) => {
+    e.stopPropagation();
+    try {
+      await triggerCloudWorkflow(wf.workflow_id);
+    } catch (err) {
+      console.error(`[WorkflowsView] Trigger cloud workflow failed`, err);
+    }
+  };
+
+  const handleCloudDelete = async (e: React.MouseEvent, wf: CloudWorkflow) => {
+    e.stopPropagation();
+    try {
+      await deleteCloudWorkflow(wf.workflow_id);
+    } catch (err) {
+      console.error(`[WorkflowsView] Delete cloud workflow failed`, err);
+    }
+  };
+
+  // Create on Cloud dialog state
+  const [showCloudCreate, setShowCloudCreate] = useState(false);
+  const [newCloudName, setNewCloudName] = useState("");
+  const [newCloudTimezone, setNewCloudTimezone] = useState("UTC");
+  const [creatingCloud, setCreatingCloud] = useState(false);
+
+  const handleCreateOnCloud = async () => {
+    if (!newCloudName.trim()) return;
+    setCreatingCloud(true);
+    try {
+      await createCloudWorkflow({
+        name: newCloudName.trim(),
+        timezone: newCloudTimezone,
+        nodes: [],
+        edges: [],
+      });
+      setShowCloudCreate(false);
+      setNewCloudName("");
+      setNewCloudTimezone("UTC");
+      await refreshCloudWorkflows();
+    } catch (err) {
+      console.error(`[WorkflowsView] Create cloud workflow failed`, err);
+    } finally {
+      setCreatingCloud(false);
     }
   };
 
@@ -242,11 +334,12 @@ export default function WorkflowsView({ onOpenWorkflow, onWorkflowsChanged, newW
       </div>
 
       <div className="workflow-grid">
+        {/* Local workflows */}
         {filteredWorkflows.map((wf) => {
           const isEnabled = isWorkflowEnabled(wf.workspace, wf.name);
           return (
             <div
-              key={wf.name}
+              key={`local-${wf.name}`}
               className={`workflow-card${isEnabled ? " workflow-card-active" : ""}`}
               onClick={() => onOpenWorkflow(wf.workspace, wf.name)}
             >
@@ -265,7 +358,14 @@ export default function WorkflowsView({ onOpenWorkflow, onWorkflowsChanged, newW
                   {isEnabled ? "Run" : "Run (Manual)"}
                 </Button>
               </div>
-              <div className="workflow-card-name">{wf.name}</div>
+              <div className="workflow-card-name">
+                {wf.name}
+                {cloudConnected && (
+                  <span className="workflow-badge workflow-badge-local">
+                    <HardDrive size={10} /> Local
+                  </span>
+                )}
+              </div>
               {wf.description && (
                 <div className="workflow-card-desc">{wf.description}</div>
               )}
@@ -276,11 +376,61 @@ export default function WorkflowsView({ onOpenWorkflow, onWorkflowsChanged, newW
             </div>
           );
         })}
-        {filteredWorkflows.length === 0 && deferredSearch && (
+
+        {/* Cloud workflows */}
+        {cloudConnected && filteredCloudWorkflows.map((wf) => (
+          <div
+            key={`cloud-${wf.workflow_id}`}
+            className={`workflow-card${wf.enabled ? " workflow-card-active" : ""}`}
+          >
+            <div className="workflow-card-controls">
+              <Switch
+                checked={wf.enabled}
+                onClick={(e) => handleCloudToggle(e, wf)}
+                className="data-[state=checked]:bg-[var(--success)]"
+              />
+              <Button
+                size="xs"
+                variant={wf.enabled ? "default" : "ghost"}
+                onClick={(e) => handleCloudRun(e, wf)}
+                title="Trigger cloud workflow"
+              >
+                Run
+              </Button>
+              <Button
+                size="xs"
+                variant="ghost"
+                onClick={(e) => handleCloudDelete(e, wf)}
+                title="Delete cloud workflow"
+              >
+                <X size={12} />
+              </Button>
+            </div>
+            <div className="workflow-card-name">
+              {wf.name}
+              <span className="workflow-badge workflow-badge-cloud">
+                <Cloud size={10} /> Cloud
+              </span>
+            </div>
+            {wf.description && (
+              <div className="workflow-card-desc">{wf.description}</div>
+            )}
+            <div className="workflow-card-meta">
+              <span>{wf.nodes.length} node{wf.nodes.length !== 1 ? "s" : ""}</span>
+              <span className="workflow-tz-badge">{wf.timezone}</span>
+              {wf.enabled && <span className="workflow-active-badge">Active</span>}
+            </div>
+          </div>
+        ))}
+
+        {/* Empty states */}
+        {filteredWorkflows.length === 0 && filteredCloudWorkflows.length === 0 && deferredSearch && (
           <div className="workflow-card workflow-card-empty">
             <div className="workflow-card-name">No workflows matching "{deferredSearch}"</div>
           </div>
         )}
+
+        {/* New Workflow card (local) */}
         {activeWorkspace && !deferredSearch && (
           <div
             className="workflow-card workflow-card-new"
@@ -289,7 +439,69 @@ export default function WorkflowsView({ onOpenWorkflow, onWorkflowsChanged, newW
             <div className="workflow-card-name">+ New Workflow</div>
           </div>
         )}
+
+        {/* Create on Cloud card */}
+        {cloudConnected && !deferredSearch && (
+          <div
+            className="workflow-card workflow-card-new workflow-card-cloud-new"
+            onClick={() => setShowCloudCreate(true)}
+          >
+            <div className="workflow-card-name">
+              <Cloud size={14} /> Create on Cloud
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* Cloud Create Dialog */}
+      {showCloudCreate && (
+        <div className="cloud-create-overlay" onClick={() => setShowCloudCreate(false)}>
+          <div className="cloud-create-dialog" onClick={(e) => e.stopPropagation()}>
+            <h3>Create Cloud Workflow</h3>
+            <label className="cloud-create-label">
+              Name
+              <input
+                className="cloud-create-input"
+                type="text"
+                value={newCloudName}
+                onChange={(e) => setNewCloudName(e.target.value)}
+                placeholder="My Cloud Workflow"
+                autoFocus
+              />
+            </label>
+            <label className="cloud-create-label">
+              Timezone
+              <select
+                className="cloud-create-select"
+                value={newCloudTimezone}
+                onChange={(e) => setNewCloudTimezone(e.target.value)}
+              >
+                {TIMEZONES.map((tz) => (
+                  <option key={tz} value={tz}>
+                    {tz}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="cloud-create-actions">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowCloudCreate(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleCreateOnCloud}
+                disabled={!newCloudName.trim() || creatingCloud}
+              >
+                {creatingCloud ? "Creating..." : "Create"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showTemplateGallery && (
         <TemplateGallery

@@ -18,8 +18,16 @@ import {
   cloudListTasks,
   cloudSyncAgent,
   cloudSubmitTask,
+  cloudListWorkflows,
+  cloudCreateWorkflow,
+  cloudDeleteWorkflow,
+  cloudTriggerWorkflow,
+  cloudEnableWorkflow,
+  cloudListWorkflowRuns,
   type CloudAgent,
   type CloudTask,
+  type CloudWorkflow,
+  type CloudWorkflowRun,
 } from "../api/cloudClient";
 
 // ---------------------------------------------------------------------------
@@ -37,6 +45,10 @@ interface CloudContextValue {
   tasks: CloudTask[];
   loading: boolean;
   error: string | null;
+
+  // Workflow state
+  cloudWorkflows: CloudWorkflow[];
+  cloudWorkflowRuns: Map<string, CloudWorkflowRun[]>;
 
   // Connection status indicators
   cloudApiOk: boolean;
@@ -57,6 +69,14 @@ interface CloudContextValue {
     model: string;
   }) => Promise<{ ok: boolean }>;
   submitTask: (agentName: string, message: string) => Promise<CloudTask>;
+
+  // Workflow actions
+  refreshCloudWorkflows: () => Promise<void>;
+  createCloudWorkflow: (wf: Partial<CloudWorkflow>) => Promise<CloudWorkflow>;
+  deleteCloudWorkflow: (workflowId: string) => Promise<void>;
+  triggerCloudWorkflow: (workflowId: string) => Promise<CloudWorkflowRun>;
+  enableCloudWorkflow: (workflowId: string, enabled: boolean) => Promise<void>;
+  refreshCloudWorkflowRuns: (workflowId: string) => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -80,6 +100,12 @@ export function CloudProvider({ children }: { children: ReactNode }) {
   const [tasks, setTasks] = useState<CloudTask[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Workflow state
+  const [cloudWorkflows, setCloudWorkflows] = useState<CloudWorkflow[]>([]);
+  const [cloudWorkflowRuns, setCloudWorkflowRuns] = useState<
+    Map<string, CloudWorkflowRun[]>
+  >(new Map());
 
   // Connection status indicators
   const [cloudApiOk, setCloudApiOk] = useState(false);
@@ -110,6 +136,12 @@ export function CloudProvider({ children }: { children: ReactNode }) {
         setTasks(tasksList);
       } catch {
         // Non-fatal: tasks list may fail independently
+      }
+      try {
+        const wfList = await cloudListWorkflows(url);
+        setCloudWorkflows(wfList);
+      } catch {
+        // Non-fatal: workflows list may fail independently
       }
     } catch (e) {
       setConnected(false);
@@ -161,6 +193,8 @@ export function CloudProvider({ children }: { children: ReactNode }) {
         setOrg("");
         setAgents([]);
         setTasks([]);
+        setCloudWorkflows([]);
+        setCloudWorkflowRuns(new Map());
         setCloudApiOk(false);
         setError(null);
       }
@@ -218,6 +252,8 @@ export function CloudProvider({ children }: { children: ReactNode }) {
     setOrg("");
     setAgents([]);
     setTasks([]);
+    setCloudWorkflows([]);
+    setCloudWorkflowRuns(new Map());
   }, []);
 
   const refreshAgents = useCallback(async () => {
@@ -257,6 +293,87 @@ export function CloudProvider({ children }: { children: ReactNode }) {
     [cloudUrl],
   );
 
+  // --- Workflow actions ---
+
+  const refreshCloudWorkflowsAction = useCallback(async () => {
+    try {
+      const wfList = await cloudListWorkflows(cloudUrl);
+      setCloudWorkflows(wfList);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [cloudUrl]);
+
+  const createCloudWorkflowAction = useCallback(
+    async (wf: Partial<CloudWorkflow>) => {
+      const created = await cloudCreateWorkflow(cloudUrl, wf);
+      // Add to local state immediately
+      setCloudWorkflows((prev) => [...prev, created]);
+      return created;
+    },
+    [cloudUrl],
+  );
+
+  const deleteCloudWorkflowAction = useCallback(
+    async (workflowId: string) => {
+      await cloudDeleteWorkflow(cloudUrl, workflowId);
+      setCloudWorkflows((prev) =>
+        prev.filter((w) => w.workflow_id !== workflowId),
+      );
+      setCloudWorkflowRuns((prev) => {
+        const next = new Map(prev);
+        next.delete(workflowId);
+        return next;
+      });
+    },
+    [cloudUrl],
+  );
+
+  const triggerCloudWorkflowAction = useCallback(
+    async (workflowId: string) => {
+      const run = await cloudTriggerWorkflow(cloudUrl, workflowId);
+      // Add run to local state
+      setCloudWorkflowRuns((prev) => {
+        const next = new Map(prev);
+        const existing = next.get(workflowId) ?? [];
+        next.set(workflowId, [run, ...existing]);
+        return next;
+      });
+      return run;
+    },
+    [cloudUrl],
+  );
+
+  const enableCloudWorkflowAction = useCallback(
+    async (workflowId: string, enabledValue: boolean) => {
+      const updated = await cloudEnableWorkflow(
+        cloudUrl,
+        workflowId,
+        enabledValue,
+      );
+      setCloudWorkflows((prev) =>
+        prev.map((w) => (w.workflow_id === workflowId ? updated : w)),
+      );
+    },
+    [cloudUrl],
+  );
+
+  const refreshCloudWorkflowRunsAction = useCallback(
+    async (workflowId: string) => {
+      try {
+        const runs = await cloudListWorkflowRuns(cloudUrl, workflowId);
+        setCloudWorkflowRuns((prev) => {
+          const next = new Map(prev);
+          next.set(workflowId, runs);
+          return next;
+        });
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    },
+    [cloudUrl],
+  );
+
   return (
     <CloudContext.Provider
       value={{
@@ -269,6 +386,8 @@ export function CloudProvider({ children }: { children: ReactNode }) {
         tasks,
         loading,
         error,
+        cloudWorkflows,
+        cloudWorkflowRuns,
         cloudApiOk,
         githubPatOk,
         claudeCliOk,
@@ -280,6 +399,12 @@ export function CloudProvider({ children }: { children: ReactNode }) {
         refreshTasks,
         syncAgent: syncAgentAction,
         submitTask: submitTaskAction,
+        refreshCloudWorkflows: refreshCloudWorkflowsAction,
+        createCloudWorkflow: createCloudWorkflowAction,
+        deleteCloudWorkflow: deleteCloudWorkflowAction,
+        triggerCloudWorkflow: triggerCloudWorkflowAction,
+        enableCloudWorkflow: enableCloudWorkflowAction,
+        refreshCloudWorkflowRuns: refreshCloudWorkflowRunsAction,
       }}
     >
       {children}

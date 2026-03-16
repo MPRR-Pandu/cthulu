@@ -2,9 +2,16 @@ import { Cloud, CloudOff } from "lucide-react";
 import { useCloud } from "../contexts/CloudContext";
 
 export default function CloudIndicator() {
-  const { enabled, connected, loading, org } = useCloud();
+  const { enabled, connected, loading } = useCloud();
 
-  if (!enabled) return null;
+  if (!enabled) {
+    return (
+      <div className="cloud-indicator off">
+        <CloudOff size={12} />
+        <span>Cloud Mode Off</span>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -27,7 +34,7 @@ export default function CloudIndicator() {
   return (
     <div className="cloud-indicator connected">
       <Cloud size={12} />
-      <span>{org || "Cloud"}</span>
+      <span>Cthulu Cloud</span>
     </div>
   );
 }

@@ -62,7 +62,7 @@ export default function CloudSection() {
                 <span className="cloud-status-label">Cloud API:</span>
                 <span className="cloud-status-value">
                   {cloud.cloudApiOk
-                    ? `Connected${cloud.org ? ` (${cloud.org})` : ""}`
+                    ? "Connected"
                     : cloud.loading
                       ? "Connecting..."
                       : "Disconnected"}

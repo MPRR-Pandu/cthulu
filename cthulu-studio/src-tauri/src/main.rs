@@ -180,6 +180,16 @@ fn main() {
             commands::cloud_api::cloud_submit_task,
             commands::cloud_api::cloud_list_tasks,
             commands::cloud_api::cloud_get_task,
+            // Cloud Workflow API
+            commands::cloud_api::cloud_list_workflows,
+            commands::cloud_api::cloud_get_workflow,
+            commands::cloud_api::cloud_create_workflow,
+            commands::cloud_api::cloud_update_workflow,
+            commands::cloud_api::cloud_delete_workflow,
+            commands::cloud_api::cloud_trigger_workflow,
+            commands::cloud_api::cloud_enable_workflow,
+            commands::cloud_api::cloud_list_workflow_runs,
+            commands::cloud_api::cloud_get_workflow_run,
             // PTY
             commands::pty::spawn_pty,
             commands::pty::write_pty,

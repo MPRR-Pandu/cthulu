@@ -8095,6 +8095,13 @@ button:active:not(:disabled),
   background: var(--bg-secondary);
 }
 
+.cloud-indicator.off {
+  color: var(--text-secondary);
+  border-color: var(--border);
+  background: transparent;
+  opacity: 0.6;
+}
+
 .cloud-indicator.loading {
   color: var(--accent);
   border-color: rgba(var(--accent-rgb, 99, 102, 241), 0.3);

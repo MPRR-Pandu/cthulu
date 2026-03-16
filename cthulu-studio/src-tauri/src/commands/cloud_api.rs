@@ -281,3 +281,337 @@ pub async fn cloud_get_task(
         .await
         .map_err(|e| format!("Failed to parse cloud response: {e}"))
 }
+
+// ===========================================================================
+// Cloud Workflow API Commands (9 commands)
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// 7. cloud_list_workflows
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn cloud_list_workflows(
+    state: tauri::State<'_, AppState>,
+    ready: tauri::State<'_, crate::ReadySignal>,
+    cloud_url: String,
+) -> Result<Value, String> {
+    crate::wait_ready(&ready).await?;
+
+    let jwt = read_secret(&state.secrets_path, "cloud_jwt")
+        .ok_or_else(|| "Not logged in to cloud — no JWT found".to_string())?;
+
+    let resp = state
+        .http_client
+        .get(format!("{}/api/workflows", cloud_url))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .send()
+        .await
+        .map_err(|e| format!("Cloud API request failed: {e}"))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("Cloud API error ({status}): {body}"));
+    }
+
+    resp.json()
+        .await
+        .map_err(|e| format!("Failed to parse cloud response: {e}"))
+}
+
+// ---------------------------------------------------------------------------
+// 8. cloud_get_workflow
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn cloud_get_workflow(
+    state: tauri::State<'_, AppState>,
+    ready: tauri::State<'_, crate::ReadySignal>,
+    cloud_url: String,
+    workflow_id: String,
+) -> Result<Value, String> {
+    crate::wait_ready(&ready).await?;
+
+    let jwt = read_secret(&state.secrets_path, "cloud_jwt")
+        .ok_or_else(|| "Not logged in to cloud — no JWT found".to_string())?;
+
+    let resp = state
+        .http_client
+        .get(format!("{}/api/workflows/{}", cloud_url, workflow_id))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .send()
+        .await
+        .map_err(|e| format!("Cloud API request failed: {e}"))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("Cloud API error ({status}): {body}"));
+    }
+
+    resp.json()
+        .await
+        .map_err(|e| format!("Failed to parse cloud response: {e}"))
+}
+
+// ---------------------------------------------------------------------------
+// 9. cloud_create_workflow
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn cloud_create_workflow(
+    state: tauri::State<'_, AppState>,
+    ready: tauri::State<'_, crate::ReadySignal>,
+    cloud_url: String,
+    workflow: Value,
+) -> Result<Value, String> {
+    crate::wait_ready(&ready).await?;
+
+    let jwt = read_secret(&state.secrets_path, "cloud_jwt")
+        .ok_or_else(|| "Not logged in to cloud — no JWT found".to_string())?;
+
+    let resp = state
+        .http_client
+        .post(format!("{}/api/workflows", cloud_url))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .json(&workflow)
+        .send()
+        .await
+        .map_err(|e| format!("Cloud API request failed: {e}"))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("Cloud API error ({status}): {body}"));
+    }
+
+    resp.json()
+        .await
+        .map_err(|e| format!("Failed to parse cloud response: {e}"))
+}
+
+// ---------------------------------------------------------------------------
+// 10. cloud_update_workflow
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn cloud_update_workflow(
+    state: tauri::State<'_, AppState>,
+    ready: tauri::State<'_, crate::ReadySignal>,
+    cloud_url: String,
+    workflow_id: String,
+    updates: Value,
+) -> Result<Value, String> {
+    crate::wait_ready(&ready).await?;
+
+    let jwt = read_secret(&state.secrets_path, "cloud_jwt")
+        .ok_or_else(|| "Not logged in to cloud — no JWT found".to_string())?;
+
+    let resp = state
+        .http_client
+        .put(format!("{}/api/workflows/{}", cloud_url, workflow_id))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .json(&updates)
+        .send()
+        .await
+        .map_err(|e| format!("Cloud API request failed: {e}"))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("Cloud API error ({status}): {body}"));
+    }
+
+    resp.json()
+        .await
+        .map_err(|e| format!("Failed to parse cloud response: {e}"))
+}
+
+// ---------------------------------------------------------------------------
+// 11. cloud_delete_workflow
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn cloud_delete_workflow(
+    state: tauri::State<'_, AppState>,
+    ready: tauri::State<'_, crate::ReadySignal>,
+    cloud_url: String,
+    workflow_id: String,
+) -> Result<Value, String> {
+    crate::wait_ready(&ready).await?;
+
+    let jwt = read_secret(&state.secrets_path, "cloud_jwt")
+        .ok_or_else(|| "Not logged in to cloud — no JWT found".to_string())?;
+
+    let resp = state
+        .http_client
+        .delete(format!("{}/api/workflows/{}", cloud_url, workflow_id))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .send()
+        .await
+        .map_err(|e| format!("Cloud API request failed: {e}"))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("Cloud API error ({status}): {body}"));
+    }
+
+    Ok(json!({ "ok": true }))
+}
+
+// ---------------------------------------------------------------------------
+// 12. cloud_trigger_workflow
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn cloud_trigger_workflow(
+    state: tauri::State<'_, AppState>,
+    ready: tauri::State<'_, crate::ReadySignal>,
+    cloud_url: String,
+    workflow_id: String,
+) -> Result<Value, String> {
+    crate::wait_ready(&ready).await?;
+
+    let jwt = read_secret(&state.secrets_path, "cloud_jwt")
+        .ok_or_else(|| "Not logged in to cloud — no JWT found".to_string())?;
+
+    let resp = state
+        .http_client
+        .post(format!(
+            "{}/api/workflows/{}/trigger",
+            cloud_url, workflow_id
+        ))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .send()
+        .await
+        .map_err(|e| format!("Cloud API request failed: {e}"))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("Cloud API error ({status}): {body}"));
+    }
+
+    resp.json()
+        .await
+        .map_err(|e| format!("Failed to parse cloud response: {e}"))
+}
+
+// ---------------------------------------------------------------------------
+// 13. cloud_enable_workflow
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn cloud_enable_workflow(
+    state: tauri::State<'_, AppState>,
+    ready: tauri::State<'_, crate::ReadySignal>,
+    cloud_url: String,
+    workflow_id: String,
+    enabled: bool,
+) -> Result<Value, String> {
+    crate::wait_ready(&ready).await?;
+
+    let jwt = read_secret(&state.secrets_path, "cloud_jwt")
+        .ok_or_else(|| "Not logged in to cloud — no JWT found".to_string())?;
+
+    let resp = state
+        .http_client
+        .put(format!(
+            "{}/api/workflows/{}/enable",
+            cloud_url, workflow_id
+        ))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .json(&json!({ "enabled": enabled }))
+        .send()
+        .await
+        .map_err(|e| format!("Cloud API request failed: {e}"))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("Cloud API error ({status}): {body}"));
+    }
+
+    resp.json()
+        .await
+        .map_err(|e| format!("Failed to parse cloud response: {e}"))
+}
+
+// ---------------------------------------------------------------------------
+// 14. cloud_list_workflow_runs
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn cloud_list_workflow_runs(
+    state: tauri::State<'_, AppState>,
+    ready: tauri::State<'_, crate::ReadySignal>,
+    cloud_url: String,
+    workflow_id: String,
+) -> Result<Value, String> {
+    crate::wait_ready(&ready).await?;
+
+    let jwt = read_secret(&state.secrets_path, "cloud_jwt")
+        .ok_or_else(|| "Not logged in to cloud — no JWT found".to_string())?;
+
+    let resp = state
+        .http_client
+        .get(format!(
+            "{}/api/workflows/{}/runs",
+            cloud_url, workflow_id
+        ))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .send()
+        .await
+        .map_err(|e| format!("Cloud API request failed: {e}"))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("Cloud API error ({status}): {body}"));
+    }
+
+    resp.json()
+        .await
+        .map_err(|e| format!("Failed to parse cloud response: {e}"))
+}
+
+// ---------------------------------------------------------------------------
+// 15. cloud_get_workflow_run
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn cloud_get_workflow_run(
+    state: tauri::State<'_, AppState>,
+    ready: tauri::State<'_, crate::ReadySignal>,
+    cloud_url: String,
+    workflow_id: String,
+    run_id: String,
+) -> Result<Value, String> {
+    crate::wait_ready(&ready).await?;
+
+    let jwt = read_secret(&state.secrets_path, "cloud_jwt")
+        .ok_or_else(|| "Not logged in to cloud — no JWT found".to_string())?;
+
+    let resp = state
+        .http_client
+        .get(format!(
+            "{}/api/workflows/{}/runs/{}",
+            cloud_url, workflow_id, run_id
+        ))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .send()
+        .await
+        .map_err(|e| format!("Cloud API request failed: {e}"))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("Cloud API error ({status}): {body}"));
+    }
+
+    resp.json()
+        .await
+        .map_err(|e| format!("Failed to parse cloud response: {e}"))
+}

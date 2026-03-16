@@ -4,9 +4,10 @@ import { listAgents, deleteAgent, listPrompts, savePrompt, deletePrompt as delet
 import type { InteractSessionInfo } from "../api/client";
 import { Switch } from "@/components/ui/switch";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
-import { PanelLeftClose, ChevronRight, Plus, X, Play, Search } from "lucide-react";
+import { PanelLeftClose, ChevronRight, Plus, X, Play, Search, Cloud } from "lucide-react";
 import ConfirmDialog, { useConfirm } from "./ConfirmDialog";
 import { useWorkflowContext } from "../contexts/WorkflowContext";
+import { useCloud } from "../contexts/CloudContext";
 import { agentStatusDot, agentStatusDotDefault, deriveAgentStatus } from "../lib/status-colors";
 import { SidebarProjects } from "./SidebarProjects";
 import { NewAgentDialog } from "./NewAgentDialog";
@@ -81,6 +82,15 @@ export default function Sidebar({
   const deferredSearch = useDeferredValue(workflowSearch);
   const sidebarSearchRef = useRef<HTMLInputElement>(null);
 
+  // Cloud state
+  const {
+    connected: cloudConnected,
+    cloudWorkflows,
+    triggerCloudWorkflow,
+    enableCloudWorkflow,
+    deleteCloudWorkflow,
+  } = useCloud();
+
   const filteredWorkflows = useMemo(() => {
     const q = deferredSearch.trim().toLowerCase();
     if (!q) return workflows;
@@ -89,6 +99,16 @@ export default function Sidebar({
       (wf.description && wf.description.toLowerCase().includes(q))
     );
   }, [workflows, deferredSearch]);
+
+  const filteredCloudWorkflows = useMemo(() => {
+    const q = deferredSearch.trim().toLowerCase();
+    if (!q) return cloudWorkflows;
+    return cloudWorkflows.filter(
+      (wf) =>
+        wf.name.toLowerCase().includes(q) ||
+        (wf.description && wf.description.toLowerCase().includes(q)),
+    );
+  }, [cloudWorkflows, deferredSearch]);
 
   const refreshAgents = useCallback(async () => {
     try {
@@ -313,7 +333,56 @@ export default function Sidebar({
                     </div>
                     );
                   })}
-                  {filteredWorkflows.length === 0 && (
+                  {/* Cloud workflows */}
+                  {cloudConnected && filteredCloudWorkflows.map((wf) => (
+                    <div
+                      key={`cloud-${wf.workflow_id}`}
+                      className={`sidebar-item${wf.enabled ? " sidebar-wf-enabled" : ""}`}
+                    >
+                      <div className="sidebar-item-row">
+                        <div className="sidebar-item-name">
+                          <Cloud size={10} className="sidebar-cloud-icon" />
+                          {wf.name}
+                        </div>
+                        <div className="sidebar-wf-actions">
+                          <Switch
+                            checked={wf.enabled}
+                            onCheckedChange={() => enableCloudWorkflow(wf.workflow_id, !wf.enabled)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="data-[state=checked]:bg-[var(--success)]"
+                          />
+                          <button
+                            className="ghost sidebar-run-btn"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              triggerCloudWorkflow(wf.workflow_id);
+                            }}
+                            title="Run cloud workflow"
+                            aria-label="Run cloud workflow"
+                          >
+                            <Play size={11} />
+                          </button>
+                          <button
+                            className="ghost sidebar-delete-btn"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              deleteCloudWorkflow(wf.workflow_id);
+                            }}
+                            title="Delete cloud workflow"
+                            aria-label="Delete cloud workflow"
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
+                      </div>
+                      <div className="sidebar-item-meta sidebar-wf-meta">
+                        <span>{wf.nodes.length} node{wf.nodes.length !== 1 ? "s" : ""}</span>
+                        <span className="sidebar-cloud-badge">Cloud</span>
+                        {wf.enabled && <span className="sidebar-wf-active-badge">Active</span>}
+                      </div>
+                    </div>
+                  ))}
+                  {filteredWorkflows.length === 0 && filteredCloudWorkflows.length === 0 && (
                     <div className="sidebar-item-empty">
                       {deferredSearch ? `No matches for "${deferredSearch}"` : "No workflows in this workspace"}
                     </div>

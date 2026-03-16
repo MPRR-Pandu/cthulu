@@ -2164,6 +2164,124 @@ button:disabled {
   background: color-mix(in srgb, var(--success) 12%, transparent);
 }
 
+/* Workflow badges — Local / Cloud */
+.workflow-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: var(--radius);
+  margin-left: var(--space-2);
+  vertical-align: middle;
+}
+
+.workflow-badge-local {
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--text-secondary) 12%, transparent);
+}
+
+.workflow-badge-cloud {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.workflow-tz-badge {
+  font-size: var(--text-2xs);
+  color: var(--text-secondary);
+  padding: 1px 4px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--text-secondary) 8%, transparent);
+}
+
+/* Sidebar cloud badges */
+.sidebar-cloud-badge {
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--accent);
+  padding: 0 4px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.sidebar-cloud-icon {
+  display: inline;
+  margin-right: 3px;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+/* Cloud workflow card: "Create on Cloud" */
+.workflow-card-cloud-new .workflow-card-name {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--accent);
+}
+
+/* Cloud Create Dialog */
+.cloud-create-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.cloud-create-dialog {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-6);
+  min-width: 360px;
+  max-width: 440px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.cloud-create-dialog h3 {
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--text);
+  margin: 0;
+}
+
+.cloud-create-label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.cloud-create-input,
+.cloud-create-select {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-secondary);
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-family: inherit;
+}
+
+.cloud-create-input:focus,
+.cloud-create-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.cloud-create-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
 
 .palette-item {
   display: flex;

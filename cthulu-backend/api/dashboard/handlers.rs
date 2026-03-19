@@ -25,6 +25,10 @@ const CLAUDE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 /// Prevents arbitrary env var exfiltration via user-controlled `slack_token_env`.
 const ALLOWED_TOKEN_ENVS: &[&str] = &["SLACK_USER_TOKEN", "SLACK_BOT_TOKEN"];
 
+/// Maximum byte size of the serialized channels JSON allowed in the summary prompt.
+/// Prevents excessive token usage and protects against Claude CLI input limits.
+const MAX_SUMMARY_INPUT_BYTES: usize = 200_000;
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DashboardConfig {
     pub channels: Vec<String>,
@@ -71,7 +75,7 @@ pub(crate) async fn get_config(State(state): State<AppState>) -> impl IntoRespon
 /// POST /api/dashboard/config
 pub(crate) async fn save_config(
     State(state): State<AppState>,
-    Json(body): Json<DashboardConfig>,
+    Json(mut body): Json<DashboardConfig>,
 ) -> impl IntoResponse {
     // Reject disallowed env var names at write time (defense in depth).
     if !ALLOWED_TOKEN_ENVS.contains(&body.slack_token_env.as_str()) {
@@ -83,6 +87,13 @@ pub(crate) async fn save_config(
             )
         })));
     }
+
+    // Sanitize channel names: trim whitespace, strip leading '#', drop empty entries.
+    body.channels = body.channels
+        .iter()
+        .map(|c| c.trim().trim_start_matches('#').to_string())
+        .filter(|c| !c.is_empty())
+        .collect();
 
     let path = config_path(&state);
     let tmp_path = path.with_extension("json.tmp");
@@ -265,6 +276,19 @@ pub(crate) async fn generate_summary(
 
     // Build a prompt that asks Claude to summarize each channel
     let channels_text = serde_json::to_string_pretty(&body.channels).unwrap_or_default();
+
+    if channels_text.len() > MAX_SUMMARY_INPUT_BYTES {
+        return Err((
+            StatusCode::PAYLOAD_TOO_LARGE,
+            Json(json!({
+                "error": format!(
+                    "Message payload too large ({} bytes, max {}). Try fewer channels or a shorter time window.",
+                    channels_text.len(),
+                    MAX_SUMMARY_INPUT_BYTES
+                )
+            })),
+        ));
+    }
 
     let meta_prompt = format!(
         r##"You are summarizing Slack channel messages for a daily dashboard.
@@ -563,5 +587,32 @@ mod tests {
     #[test]
     fn default_token_env_is_in_allowlist() {
         assert!(ALLOWED_TOKEN_ENVS.contains(&default_token_env().as_str()));
+    }
+
+    // ── Summary input size limit ──────────────────────────────
+
+    #[test]
+    fn max_summary_input_bytes_is_reasonable() {
+        assert!(MAX_SUMMARY_INPUT_BYTES >= 100_000, "limit too restrictive");
+        assert!(MAX_SUMMARY_INPUT_BYTES <= 500_000, "limit too generous");
+    }
+
+    // ── Channel name sanitization ─────────────────────────────
+
+    #[test]
+    fn channel_names_are_trimmed_and_filtered() {
+        let names = vec![
+            "  general ".to_string(),
+            "#devops".to_string(),
+            "  ".to_string(),
+            "".to_string(),
+            "  #alerts  ".to_string(),
+        ];
+        let sanitized: Vec<String> = names
+            .iter()
+            .map(|c| c.trim().trim_start_matches('#').to_string())
+            .filter(|c| !c.is_empty())
+            .collect();
+        assert_eq!(sanitized, vec!["general", "devops", "alerts"]);
     }
 }

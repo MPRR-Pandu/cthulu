@@ -101,7 +101,7 @@ class SlackFetcher:
         convos = [c for c in convos if c.get("is_im") or c.get("is_mpim") or c.get("is_member")]
         if channel_filter:
             names = {n.lower().lstrip("#") for n in channel_filter}
-            convos = [c for c in convos if c.get("name", "").lower() in names or c.get("is_im") or c.get("is_mpim")]
+            convos = [c for c in convos if c.get("name", "").lower() in names]
         return convos
 
     def fetch_thread_replies(self, channel_id: str, thread_ts: str) -> list:
@@ -111,6 +111,8 @@ class SlackFetcher:
             # 200+ replies will be silently truncated. Acceptable for dashboard use.
             resp = self._call(self.client.conversations_replies,
                               channel=channel_id, ts=thread_ts, limit=200)
+            if resp.get("has_more", False):
+                print(f"  Warning: thread {thread_ts} has more than 200 replies, truncated", file=sys.stderr)
             replies = resp.get("messages", [])
             # First message is the parent — skip it, return only replies
             return replies[1:] if len(replies) > 1 else []

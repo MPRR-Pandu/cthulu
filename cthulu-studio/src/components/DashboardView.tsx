@@ -156,8 +156,10 @@ export default function DashboardView() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       const cfg = await loadConfig();
+      if (cancelled) return;
       if (cfg?.first_run) {
         setShowChannelDialog(true);
         setLoading(false);
@@ -167,6 +169,7 @@ export default function DashboardView() {
         setLoading(false);
       }
     })();
+    return () => { cancelled = true; };
   }, [loadConfig, loadMessages]);
 
   const handleSaveChannels = async () => {

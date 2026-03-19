@@ -292,6 +292,10 @@ pub(crate) async fn generate_summary(
         ));
     }
 
+    // Sanitize: strip any XML-like tags from the serialized JSON to prevent
+    // prompt boundary spoofing (e.g., a Slack message containing "</messages>").
+    let sanitized_text = channels_text.replace("</", "&lt;/").replace("< /", "&lt; /");
+
     let meta_prompt = format!(
         r##"You are summarizing Slack channel messages for a daily dashboard.
 
@@ -303,9 +307,9 @@ Below is JSON data containing today's messages from multiple Slack channels, inc
 
 For EACH channel, write a concise 2-3 sentence summary of the key topics, decisions, and action items discussed.
 
-<messages>
-{channels_text}
-</messages>
+```json
+{sanitized_text}
+```
 
 Respond ONLY with valid JSON in this exact format:
 {{"summaries": [{{"channel": "#channel-name", "summary": "Brief summary of key topics and action items..."}}]}}
@@ -464,12 +468,11 @@ mod tests {
     }
 
     #[test]
-    fn config_empty_json_object_uses_defaults() {
+    fn config_rejects_empty_json_missing_required_channels() {
         // channels field is required in DashboardConfig, so an empty JSON object
         // should fail to parse (channels has no serde default).
         let json = r#"{}"#;
         let result = serde_json::from_str::<DashboardConfig>(json);
-        // This should fail because "channels" is required
         assert!(result.is_err());
     }
 

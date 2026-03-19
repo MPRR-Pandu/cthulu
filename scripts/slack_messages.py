@@ -144,6 +144,8 @@ class SlackFetcher:
             time.sleep(0.4)
 
             msgs = resp.get("messages", [])
+            if resp.get("has_more", False):
+                print(f"  Warning: #{name} has more than 200 messages in this window, oldest messages truncated", file=sys.stderr)
             if debug:
                 print(f"\n[debug] {name}: {len(msgs)} raw messages", file=sys.stderr)
                 for m in msgs[:5]:

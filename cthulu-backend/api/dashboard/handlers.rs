@@ -1,0 +1,334 @@
+/// Dashboard endpoints for Slack channel monitoring.
+///
+/// GET  /api/dashboard/config    — read channel config from ~/.cthulu/dashboard.json
+/// POST /api/dashboard/config    — save channel config
+/// GET  /api/dashboard/messages  — fetch today's messages (with threads) via Python sidecar
+/// POST /api/dashboard/summary   — generate per-channel AI summaries via Claude CLI
+use axum::extract::State;
+use axum::response::IntoResponse;
+use axum::Json;
+use hyper::StatusCode;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+use std::process::Stdio;
+use tokio::io::{AsyncWriteExt, AsyncBufReadExt, BufReader};
+use tokio::process::Command;
+
+use crate::api::AppState;
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DashboardConfig {
+    pub channels: Vec<String>,
+    #[serde(default = "default_token_env")]
+    pub slack_token_env: String,
+}
+
+fn default_token_env() -> String {
+    "SLACK_USER_TOKEN".to_string()
+}
+
+impl Default for DashboardConfig {
+    fn default() -> Self {
+        Self {
+            channels: vec![],
+            slack_token_env: default_token_env(),
+        }
+    }
+}
+
+fn config_path(state: &AppState) -> std::path::PathBuf {
+    state.data_dir.join("dashboard.json")
+}
+
+fn read_config(state: &AppState) -> DashboardConfig {
+    let path = config_path(state);
+    match std::fs::read_to_string(&path) {
+        Ok(contents) => serde_json::from_str(&contents).unwrap_or_default(),
+        Err(_) => DashboardConfig::default(),
+    }
+}
+
+/// GET /api/dashboard/config
+pub(crate) async fn get_config(State(state): State<AppState>) -> impl IntoResponse {
+    let config = read_config(&state);
+    let first_run = config.channels.is_empty();
+    Json(json!({
+        "channels": config.channels,
+        "slack_token_env": config.slack_token_env,
+        "first_run": first_run,
+    }))
+}
+
+/// POST /api/dashboard/config
+pub(crate) async fn save_config(
+    State(state): State<AppState>,
+    Json(body): Json<DashboardConfig>,
+) -> impl IntoResponse {
+    let path = config_path(&state);
+    let tmp_path = path.with_extension("json.tmp");
+
+    match serde_json::to_string_pretty(&body) {
+        Ok(json_str) => {
+            if let Err(e) = std::fs::write(&tmp_path, &json_str) {
+                tracing::error!(error = %e, "failed to write dashboard config temp file");
+                return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": format!("{e}") })));
+            }
+            if let Err(e) = std::fs::rename(&tmp_path, &path) {
+                tracing::error!(error = %e, "failed to rename dashboard config temp file");
+                return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": format!("{e}") })));
+            }
+            tracing::info!(channels = ?body.channels, "dashboard config saved");
+            (StatusCode::OK, Json(json!({ "ok": true })))
+        }
+        Err(e) => {
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": format!("{e}") })))
+        }
+    }
+}
+
+/// GET /api/dashboard/messages
+pub(crate) async fn get_messages(State(state): State<AppState>) -> impl IntoResponse {
+    let config = read_config(&state);
+
+    if config.channels.is_empty() {
+        return (StatusCode::OK, Json(json!({
+            "channels": [],
+            "message": "No channels configured. POST /api/dashboard/config first."
+        })));
+    }
+
+    // Resolve the Slack token from the configured env var name
+    let token = match std::env::var(&config.slack_token_env) {
+        Ok(t) if !t.is_empty() => t,
+        _ => {
+            return (StatusCode::BAD_REQUEST, Json(json!({
+                "error": format!("Environment variable {} is not set. Export it and restart the server.", config.slack_token_env)
+            })));
+        }
+    };
+
+    // Resolve script path: look in scripts/ relative to cwd (repo root during dev),
+    // then fall back to next to the binary.
+    let script_path = {
+        let cwd_script = std::env::current_dir()
+            .unwrap_or_else(|_| ".".into())
+            .join("scripts")
+            .join("slack_messages.py");
+        if cwd_script.exists() {
+            cwd_script
+        } else {
+            std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|d| d.join("scripts").join("slack_messages.py")))
+                .unwrap_or_else(|| "scripts/slack_messages.py".into())
+        }
+    };
+
+    if !script_path.exists() {
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
+            "error": format!("Python script not found at {}", script_path.display())
+        })));
+    }
+
+    let channel_list = config.channels.join(",");
+
+    let result = Command::new("python3")
+        .arg(&script_path)
+        .arg("--json")
+        .arg("--channels-only")
+        .arg("--channel")
+        .arg(&channel_list)
+        .arg("--all")
+        .arg("--quiet")
+        .arg("--with-threads")
+        .env("SLACK_USER_TOKEN", &token)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await;
+
+    match result {
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if !stderr.is_empty() {
+                tracing::debug!(stderr = %stderr, "slack_messages.py stderr");
+            }
+
+            if !output.status.success() {
+                let code = output.status.code().unwrap_or(-1);
+                tracing::error!(code, stderr = %stderr, "slack_messages.py failed");
+                return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
+                    "error": format!("Script exited with code {code}"),
+                    "stderr": stderr.to_string(),
+                })));
+            }
+
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            match serde_json::from_str::<serde_json::Value>(&stdout) {
+                Ok(data) => (StatusCode::OK, Json(json!({
+                    "channels": data,
+                    "fetched_at": chrono::Utc::now().to_rfc3339(),
+                }))),
+                Err(e) => {
+                    tracing::error!(error = %e, stdout = %stdout, "failed to parse script output as JSON");
+                    (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
+                        "error": "Script output was not valid JSON",
+                        "raw_output": stdout.to_string(),
+                    })))
+                }
+            }
+        }
+        Err(e) => {
+            let msg = if e.kind() == std::io::ErrorKind::NotFound {
+                "python3 not found on PATH. Install Python 3 to use the Slack dashboard.".to_string()
+            } else {
+                format!("Failed to spawn slack_messages.py: {e}")
+            };
+            tracing::error!(error = %e, "failed to run slack_messages.py");
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": msg })))
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Summary endpoint — feeds channel messages to Claude CLI for per-channel summaries
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct SummaryRequest {
+    /// The channels array from GET /api/dashboard/messages response
+    pub channels: serde_json::Value,
+}
+
+/// POST /api/dashboard/summary
+///
+/// Accepts the channels JSON from the messages endpoint and returns
+/// per-channel AI summaries generated by Claude CLI.
+pub(crate) async fn generate_summary(
+    Json(body): Json<SummaryRequest>,
+) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, Json<serde_json::Value>)> {
+    let channels = body.channels.as_array().ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "channels must be an array" })),
+        )
+    })?;
+
+    if channels.is_empty() {
+        return Ok((StatusCode::OK, Json(json!({ "summaries": [] }))));
+    }
+
+    // Build a prompt that asks Claude to summarize each channel
+    let channels_text = serde_json::to_string_pretty(&body.channels).unwrap_or_default();
+
+    let meta_prompt = format!(
+        r##"You are summarizing Slack channel messages for a daily dashboard.
+
+Below is JSON data containing today's messages from multiple Slack channels, including thread replies where available.
+
+For EACH channel, write a concise 2-3 sentence summary of the key topics, decisions, and action items discussed.
+
+Messages JSON:
+{channels_text}
+
+Respond ONLY with valid JSON in this exact format:
+{{"summaries": [{{"channel": "#channel-name", "summary": "Brief summary of key topics and action items..."}}]}}
+
+Keep each summary under 100 words. Focus on what matters: decisions made, problems raised, action items, and key updates. Skip greetings and small talk."##
+    );
+
+    // Spawn Claude CLI (same pattern as prompts/handlers.rs summarize_session)
+    let mut child = Command::new("claude")
+        .arg("--print")
+        .arg("--allowedTools")
+        .arg("")
+        .arg("-")
+        .env_remove("CLAUDECODE")
+        .env("CLAUDECODE", "")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| {
+            tracing::error!(error = %e, "failed to spawn claude for dashboard summary");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("failed to spawn claude: {e}") })),
+            )
+        })?;
+
+    // Write prompt to stdin
+    {
+        let mut stdin = child.stdin.take().expect("stdin piped");
+        stdin.write_all(meta_prompt.as_bytes()).await.map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("stdin write failed: {e}") })),
+            )
+        })?;
+        drop(stdin);
+    }
+
+    // Read stdout
+    let stdout = child.stdout.take().expect("stdout piped");
+    let reader = BufReader::new(stdout);
+    let mut lines = reader.lines();
+    let mut output = String::new();
+    while let Ok(Some(line)) = lines.next_line().await {
+        output.push_str(&line);
+        output.push('\n');
+    }
+
+    let status = child.wait().await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("process wait failed: {e}") })),
+        )
+    })?;
+
+    if !status.success() {
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("claude exited with {status}") })),
+        ));
+    }
+
+    // Parse Claude's output — strip markdown code blocks if present
+    let cleaned = output
+        .trim()
+        .trim_start_matches("```json")
+        .trim_start_matches("```")
+        .trim_end_matches("```")
+        .trim();
+
+    match serde_json::from_str::<serde_json::Value>(cleaned) {
+        Ok(parsed) => {
+            let summaries = parsed
+                .get("summaries")
+                .cloned()
+                .unwrap_or_else(|| json!([]));
+            Ok((
+                StatusCode::OK,
+                Json(json!({
+                    "summaries": summaries,
+                    "generated_at": chrono::Utc::now().to_rfc3339(),
+                })),
+            ))
+        }
+        Err(_) => {
+            // If Claude didn't return valid JSON, return the raw text as a single summary
+            tracing::warn!("Claude summary output was not valid JSON, returning raw text");
+            Ok((
+                StatusCode::OK,
+                Json(json!({
+                    "summaries": [{
+                        "channel": "all",
+                        "summary": cleaned,
+                    }],
+                    "generated_at": chrono::Utc::now().to_rfc3339(),
+                    "raw": true,
+                })),
+            ))
+        }
+    }
+}

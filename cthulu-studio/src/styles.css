@@ -88,7 +88,9 @@
   position: absolute;
   top: calc(100% + 4px);
   right: 0;
-  width: 280px;
+  width: 300px;
+  max-height: 80vh;
+  overflow-y: auto;
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -166,7 +168,7 @@
   border: 1px solid var(--border);
   border-radius: 6px;
   margin-bottom: 6px;
-  overflow: hidden;
+  overflow: visible;
 }
 .profile-team-header {
   display: flex;
@@ -225,7 +227,6 @@
 
 /* ── User Search Picker ───────────────────────────────────────── */
 .user-search {
-  position: relative;
   margin-top: 6px;
 }
 .user-search .auth-input {
@@ -233,15 +234,10 @@
   padding: 5px 8px;
 }
 .user-search-results {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  right: 0;
-  background: var(--bg-secondary);
+  background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 4px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-  z-index: 300;
+  margin-top: 4px;
   max-height: 150px;
   overflow-y: auto;
 }

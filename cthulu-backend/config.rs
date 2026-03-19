@@ -5,6 +5,7 @@ pub struct Config {
     pub port: u16,
     pub sentry_dsn: Option<String>,
     pub environment: String,
+    pub clerk_domain: Option<String>,
 }
 
 impl Config {
@@ -13,6 +14,7 @@ impl Config {
             std::env::var("PORT").ok().as_deref(),
             std::env::var("SENTRY_DSN").ok().as_deref(),
             std::env::var("ENVIRONMENT").ok().as_deref(),
+            std::env::var("CLERK_DOMAIN").ok().as_deref(),
         )
     }
 
@@ -22,6 +24,7 @@ impl Config {
         port: Option<&str>,
         sentry_dsn: Option<&str>,
         environment: Option<&str>,
+        clerk_domain: Option<&str>,
     ) -> Self {
         let port = port.and_then(|v| v.parse().ok()).unwrap_or(8081);
 
@@ -32,10 +35,13 @@ impl Config {
             .map(String::from)
             .unwrap_or_else(|| "local".to_string());
 
+        let clerk_domain = clerk_domain.filter(|s| !s.is_empty()).map(String::from);
+
         Config {
             port,
             sentry_dsn,
             environment,
+            clerk_domain,
         }
     }
 }
@@ -119,37 +125,52 @@ mod tests {
 
     #[test]
     fn test_config_invalid_port_uses_default() {
-        let config = Config::from_raw_values(Some("not-a-number"), None, None);
+        let config = Config::from_raw_values(Some("not-a-number"), None, None, None);
         assert_eq!(config.port, 8081);
     }
 
     #[test]
     fn test_config_valid_port() {
-        let config = Config::from_raw_values(Some("3000"), None, None);
+        let config = Config::from_raw_values(Some("3000"), None, None, None);
         assert_eq!(config.port, 3000);
     }
 
     #[test]
     fn test_config_empty_sentry_dsn_is_none() {
-        let config = Config::from_raw_values(None, Some(""), None);
+        let config = Config::from_raw_values(None, Some(""), None, None);
         assert!(config.sentry_dsn.is_none());
     }
 
     #[test]
     fn test_config_present_sentry_dsn() {
-        let config = Config::from_raw_values(None, Some("https://sentry.io/123"), None);
+        let config = Config::from_raw_values(None, Some("https://sentry.io/123"), None, None);
         assert_eq!(config.sentry_dsn.as_deref(), Some("https://sentry.io/123"));
     }
 
     #[test]
     fn test_config_default_environment() {
-        let config = Config::from_raw_values(None, None, None);
+        let config = Config::from_raw_values(None, None, None, None);
         assert_eq!(config.environment, "local");
     }
 
     #[test]
     fn test_config_custom_environment() {
-        let config = Config::from_raw_values(None, None, Some("production"));
+        let config = Config::from_raw_values(None, None, Some("production"), None);
         assert_eq!(config.environment, "production");
+    }
+
+    #[test]
+    fn test_config_clerk_domain() {
+        let config = Config::from_raw_values(None, None, None, Some("my-app.clerk.accounts.dev"));
+        assert_eq!(
+            config.clerk_domain.as_deref(),
+            Some("my-app.clerk.accounts.dev")
+        );
+    }
+
+    #[test]
+    fn test_config_clerk_domain_empty_is_none() {
+        let config = Config::from_raw_values(None, None, None, Some(""));
+        assert!(config.clerk_domain.is_none());
     }
 }

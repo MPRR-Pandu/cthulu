@@ -1,6 +1,7 @@
 pub mod agents;
 pub mod auth;
 pub mod changes;
+pub mod clerk_auth;
 pub mod dashboard;
 pub mod flows;
 pub mod hooks;
@@ -10,6 +11,7 @@ pub mod prompts;
 mod routes;
 pub mod scheduler;
 pub mod templates;
+pub mod user_context;
 
 use axum::Router;
 use serde::{Deserialize, Serialize};
@@ -332,6 +334,11 @@ pub struct AppState {
     pub global_hook_tx: Arc<broadcast::Sender<String>>,
     /// The port the server is listening on (used in hook URLs).
     pub server_port: u16,
+    /// Clerk domain for JWT verification (e.g., "my-app.clerk.accounts.dev").
+    /// When None, auth is bypassed (local dev mode).
+    pub clerk_domain: Option<String>,
+    /// Cached JWKS keys from Clerk for JWT verification.
+    pub jwks_cache: Arc<RwLock<Option<clerk_auth::JwksCache>>>,
 }
 
 impl AppState {

@@ -7,7 +7,7 @@
 //! and all requests get a hardcoded "dev_user" identity.
 
 use axum::extract::FromRequestParts;
-use axum::routing::post;
+use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use hyper::header::AUTHORIZATION;
 use hyper::http::request::Parts;
@@ -29,6 +29,8 @@ pub struct StoredUser {
     pub id: String,
     pub email: String,
     pub password_hash: String,
+    pub name: Option<String>,
+    pub avatar_url: Option<String>,
     pub created_at: String,
 }
 
@@ -224,6 +226,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/auth/signup", post(signup))
         .route("/auth/login", post(login))
+        .route("/auth/me", get(get_profile).put(update_profile))
 }
 
 async fn signup(
@@ -265,6 +268,8 @@ async fn signup(
         id: uuid::Uuid::new_v4().to_string().replace('-', "_"),
         email: email.clone(),
         password_hash,
+        name: None,
+        avatar_url: None,
         created_at: chrono::Utc::now().to_rfc3339(),
     };
 
@@ -342,6 +347,71 @@ async fn login(
     )
 }
 
+// ── Profile Handlers ─────────────────────────────────────────
+
+async fn get_profile(
+    auth: AuthUser,
+    axum::extract::State(state): axum::extract::State<AppState>,
+) -> (StatusCode, Json<Value>) {
+    let store = state.user_store.read().await;
+    // Find user by ID (scan values since store is keyed by email)
+    let user = store.users.values().find(|u| u.id == auth.user_id);
+    match user {
+        Some(u) => (StatusCode::OK, Json(json!({
+            "id": u.id,
+            "email": u.email,
+            "name": u.name,
+            "avatar_url": u.avatar_url,
+            "created_at": u.created_at,
+        }))),
+        None => (StatusCode::NOT_FOUND, Json(json!({ "error": "User not found" }))),
+    }
+}
+
+#[derive(Deserialize)]
+struct UpdateProfileRequest {
+    name: Option<String>,
+    avatar_url: Option<String>,
+}
+
+async fn update_profile(
+    auth: AuthUser,
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Json(body): Json<UpdateProfileRequest>,
+) -> (StatusCode, Json<Value>) {
+    let mut store = state.user_store.write().await;
+    // Find the email key for this user_id
+    let email_key = store.users.iter()
+        .find(|(_, u)| u.id == auth.user_id)
+        .map(|(email, _)| email.clone());
+
+    let Some(email) = email_key else {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "User not found" })));
+    };
+    let Some(user) = store.users.get_mut(&email) else {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "User not found" })));
+    };
+    if let Some(name) = body.name {
+        user.name = Some(name);
+    }
+    if let Some(avatar_url) = body.avatar_url {
+        user.avatar_url = Some(avatar_url);
+    }
+    let updated = user.clone();
+    drop(store);
+
+    // Save outside the mutable borrow
+    let store = state.user_store.read().await;
+    let _ = store.save(&state.data_dir);
+
+    (StatusCode::OK, Json(json!({
+        "id": updated.id,
+        "email": updated.email,
+        "name": updated.name,
+        "avatar_url": updated.avatar_url,
+    })))
+}
+
 // ── Tests ────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -390,15 +460,21 @@ mod tests {
         assert!(token.is_none());
     }
 
+    fn test_user(id: &str, email: &str) -> StoredUser {
+        StoredUser {
+            id: id.into(),
+            email: email.into(),
+            password_hash: "fake".into(),
+            name: None,
+            avatar_url: None,
+            created_at: "2026-01-01T00:00:00Z".into(),
+        }
+    }
+
     #[test]
     fn jwt_roundtrip() {
         let secret = "test_secret_123";
-        let user = StoredUser {
-            id: "user_abc".into(),
-            email: "test@example.com".into(),
-            password_hash: "fake".into(),
-            created_at: "2026-01-01T00:00:00Z".into(),
-        };
+        let user = test_user("user_abc", "test@example.com");
         let token = issue_jwt(&user, secret).unwrap();
         let claims = verify_jwt(&token, secret).unwrap();
         assert_eq!(claims.sub, "user_abc");
@@ -407,12 +483,7 @@ mod tests {
 
     #[test]
     fn jwt_wrong_secret_fails() {
-        let user = StoredUser {
-            id: "user_abc".into(),
-            email: "test@example.com".into(),
-            password_hash: "fake".into(),
-            created_at: "2026-01-01T00:00:00Z".into(),
-        };
+        let user = test_user("user_abc", "test@example.com");
         let token = issue_jwt(&user, "secret1").unwrap();
         let result = verify_jwt(&token, "secret2");
         assert!(result.is_err());
@@ -424,12 +495,7 @@ mod tests {
         let dir = tmp.path().to_path_buf();
 
         let mut store = UserStore { users: HashMap::new() };
-        store.insert(StoredUser {
-            id: "u1".into(),
-            email: "a@b.com".into(),
-            password_hash: "hash".into(),
-            created_at: "2026-01-01".into(),
-        });
+        store.insert(test_user("u1", "a@b.com"));
         store.save(&dir).unwrap();
 
         let loaded = UserStore::load(&dir);

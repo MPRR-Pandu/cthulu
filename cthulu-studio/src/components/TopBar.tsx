@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useAuth } from "./AuthGate";
 import * as api from "../api/client";
 import { log } from "../api/logger";
 import { Button } from "@/components/ui/button";
@@ -249,6 +250,120 @@ export default function TopBar({
       <Button variant="ghost" size="sm" onClick={onSettingsClick}>
         Settings
       </Button>
+
+      <ProfileMenu />
+    </div>
+  );
+}
+
+function ProfileMenu() {
+  const { logout, userEmail } = useAuth();
+  const [open, setOpen] = useState(false);
+  const [profile, setProfile] = useState<{ name: string | null; email: string } | null>(null);
+  const [teams, setTeams] = useState<{ id: string; name: string }[]>([]);
+  const [editingName, setEditingName] = useState(false);
+  const [nameInput, setNameInput] = useState("");
+  const [newTeamName, setNewTeamName] = useState("");
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  if (!userEmail) return null;
+
+  const loadData = useCallback(async () => {
+    try {
+      const [p, t] = await Promise.all([api.getProfile(), api.listTeams()]);
+      setProfile({ name: p.name, email: p.email });
+      setTeams(t.teams.map((tm) => ({ id: tm.id, name: tm.name })));
+    } catch { /* ignore if not authed */ }
+  }, []);
+
+  useEffect(() => {
+    if (open) loadData();
+  }, [open, loadData]);
+
+  // Close on click outside
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const handleSaveName = async () => {
+    if (!nameInput.trim()) return;
+    await api.updateProfile({ name: nameInput.trim() });
+    setProfile((p) => p ? { ...p, name: nameInput.trim() } : p);
+    setEditingName(false);
+  };
+
+  const handleCreateTeam = async () => {
+    if (!newTeamName.trim()) return;
+    const { team } = await api.createTeam(newTeamName.trim());
+    setTeams((prev) => [...prev, { id: team.id, name: team.name }]);
+    setNewTeamName("");
+  };
+
+  return (
+    <div className="profile-menu" ref={menuRef}>
+      <Button variant="ghost" size="sm" onClick={() => setOpen(!open)}>
+        {profile?.name || userEmail.split("@")[0]}
+      </Button>
+
+      {open && (
+        <div className="profile-dropdown">
+          <div className="profile-section">
+            <div className="profile-label">Profile</div>
+            <div className="profile-email">{profile?.email || userEmail}</div>
+            {editingName ? (
+              <div className="profile-name-edit">
+                <input
+                  className="auth-input"
+                  value={nameInput}
+                  onChange={(e) => setNameInput(e.target.value)}
+                  placeholder="Display name"
+                  autoFocus
+                  onKeyDown={(e) => e.key === "Enter" && handleSaveName()}
+                />
+                <Button variant="ghost" size="sm" onClick={handleSaveName}>Save</Button>
+              </div>
+            ) : (
+              <button
+                className="profile-name-btn"
+                onClick={() => { setNameInput(profile?.name || ""); setEditingName(true); }}
+              >
+                {profile?.name || "Set display name"}
+              </button>
+            )}
+          </div>
+
+          <div className="profile-divider" />
+
+          <div className="profile-section">
+            <div className="profile-label">Teams</div>
+            {teams.length === 0 && (
+              <div className="profile-empty">No teams yet</div>
+            )}
+            {teams.map((t) => (
+              <div key={t.id} className="profile-team-item">{t.name}</div>
+            ))}
+            <div className="profile-name-edit">
+              <input
+                className="auth-input"
+                value={newTeamName}
+                onChange={(e) => setNewTeamName(e.target.value)}
+                placeholder="New team name"
+                onKeyDown={(e) => e.key === "Enter" && handleCreateTeam()}
+              />
+              <Button variant="ghost" size="sm" onClick={handleCreateTeam}>Create</Button>
+            </div>
+          </div>
+
+          <div className="profile-divider" />
+
+          <button className="profile-signout" onClick={logout}>Sign Out</button>
+        </div>
+      )}
     </div>
   );
 }

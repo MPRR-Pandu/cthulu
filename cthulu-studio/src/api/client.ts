@@ -733,3 +733,77 @@ export async function getDashboardSummary(
     body: JSON.stringify({ channels }),
   });
 }
+
+// ── Profile ──────────────────────────────────────────────────
+
+export interface UserProfile {
+  id: string;
+  email: string;
+  name: string | null;
+  avatar_url: string | null;
+  created_at: string;
+}
+
+export async function getProfile(): Promise<UserProfile> {
+  return apiFetch<UserProfile>("/auth/me");
+}
+
+export async function updateProfile(data: {
+  name?: string;
+  avatar_url?: string;
+}): Promise<UserProfile> {
+  return apiFetch<UserProfile>("/auth/me", {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+}
+
+// ── Teams ────────────────────────────────────────────────────
+
+export interface TeamMember {
+  id: string;
+  email: string;
+  name: string | null;
+}
+
+export interface Team {
+  id: string;
+  name: string;
+  created_by: string;
+  members: TeamMember[] | string[];
+  created_at: string;
+}
+
+export async function listTeams(): Promise<{ teams: Team[] }> {
+  return apiFetch<{ teams: Team[] }>("/teams");
+}
+
+export async function createTeam(name: string): Promise<{ team: Team }> {
+  return apiFetch<{ team: Team }>("/teams", {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function getTeam(id: string): Promise<{ team: Team }> {
+  return apiFetch<{ team: Team }>(`/teams/${id}`);
+}
+
+export async function addTeamMember(
+  teamId: string,
+  email: string,
+): Promise<{ ok: boolean }> {
+  return apiFetch<{ ok: boolean }>(`/teams/${teamId}/members`, {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+export async function removeTeamMember(
+  teamId: string,
+  userId: string,
+): Promise<{ ok: boolean }> {
+  return apiFetch<{ ok: boolean }>(`/teams/${teamId}/members/${userId}`, {
+    method: "DELETE",
+  });
+}

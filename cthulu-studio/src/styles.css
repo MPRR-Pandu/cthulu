@@ -82,6 +82,84 @@
 }
 .auth-toggle:hover { text-decoration: underline; }
 
+/* ── Profile Menu ─────────────────────────────────────────────── */
+.profile-menu { position: relative; }
+.profile-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  width: 280px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+  z-index: 200;
+  padding: 8px 0;
+}
+.profile-section { padding: 8px 14px; }
+.profile-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+.profile-email {
+  font-size: 12px;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+.profile-name-btn {
+  display: block;
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+}
+.profile-name-btn:hover { text-decoration: underline; }
+.profile-name-edit {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  margin-top: 4px;
+}
+.profile-name-edit .auth-input {
+  flex: 1;
+  padding: 5px 8px;
+  font-size: 12px;
+}
+.profile-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+}
+.profile-team-item {
+  font-size: 12px;
+  color: var(--text);
+  padding: 3px 0;
+}
+.profile-empty {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-style: italic;
+  padding: 2px 0;
+}
+.profile-signout {
+  display: block;
+  width: 100%;
+  padding: 8px 14px;
+  background: none;
+  border: none;
+  color: #ef4444;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.profile-signout:hover { background: var(--bg); }
+
 /* ── Register shadcn color tokens for Tailwind v4 ──────────────────────
    Maps Tailwind utility names (bg-popover, text-muted-foreground, etc.)
    to our :root CSS variables. Without this, bg-popover etc. are transparent. */

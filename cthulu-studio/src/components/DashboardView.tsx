@@ -199,7 +199,10 @@ export default function DashboardView() {
     loadSummary(channels);
   };
 
-  const totalMessages = channels.reduce((sum, ch) => sum + ch.count, 0);
+  const totalMessages = useMemo(
+    () => channels.reduce((sum, ch) => sum + ch.count, 0),
+    [channels],
+  );
 
   return (
     <div className="dashboard-view">

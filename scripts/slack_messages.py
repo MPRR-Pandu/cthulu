@@ -107,6 +107,8 @@ class SlackFetcher:
     def fetch_thread_replies(self, channel_id: str, thread_ts: str) -> list:
         """Fetch all replies in a thread."""
         try:
+            # NOTE: limit=200 without cursor-based pagination means threads with
+            # 200+ replies will be silently truncated. Acceptable for dashboard use.
             resp = self._call(self.client.conversations_replies,
                               channel=channel_id, ts=thread_ts, limit=200)
             replies = resp.get("messages", [])
@@ -124,7 +126,7 @@ class SlackFetcher:
         convos = self.list_conversations(conv_types, channel_filter)
         if debug:
             print(f"[debug] Found {len(convos)} conversations", file=sys.stderr)
-            print(f"[debug] Time window: {datetime.fromtimestamp(oldest)} -> {datetime.fromtimestamp(latest)}", file=sys.stderr)
+            print(f"[debug] Time window: {datetime.fromtimestamp(oldest, tz=timezone.utc)} -> {datetime.fromtimestamp(latest, tz=timezone.utc)}", file=sys.stderr)
         results = []
 
         for conv in convos:
@@ -168,7 +170,7 @@ class SlackFetcher:
             formatted = []
             for m in msgs:
                 msg_data = {
-                    "time": datetime.fromtimestamp(float(m["ts"])).isoformat(),
+                    "time": datetime.fromtimestamp(float(m["ts"]), tz=timezone.utc).isoformat(),
                     "user": self.users.get(m.get("user", ""), "unknown"),
                     "text": m.get("text", ""),
                     "ts": m["ts"],
@@ -180,7 +182,7 @@ class SlackFetcher:
                     raw_replies = self.fetch_thread_replies(cid, m["ts"])
                     msg_data["replies"] = [
                         {
-                            "time": datetime.fromtimestamp(float(r["ts"])).isoformat(),
+                            "time": datetime.fromtimestamp(float(r["ts"]), tz=timezone.utc).isoformat(),
                             "user": self.users.get(r.get("user", ""), "unknown"),
                             "text": r.get("text", ""),
                             "ts": r["ts"],

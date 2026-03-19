@@ -264,6 +264,10 @@ function ProfileMenu() {
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState("");
   const [newTeamName, setNewTeamName] = useState("");
+  const [expandedTeam, setExpandedTeam] = useState<string | null>(null);
+  const [teamMembers, setTeamMembers] = useState<Record<string, { id: string; email: string; name: string | null }[]>>({});
+  const [addMemberEmail, setAddMemberEmail] = useState("");
+  const [memberError, setMemberError] = useState("");
   const menuRef = useRef<HTMLDivElement>(null);
 
   if (!userEmail) return null;
@@ -295,6 +299,42 @@ function ProfileMenu() {
     await api.updateProfile({ name: nameInput.trim() });
     setProfile((p) => p ? { ...p, name: nameInput.trim() } : p);
     setEditingName(false);
+  };
+
+  const handleExpandTeam = async (teamId: string) => {
+    if (expandedTeam === teamId) {
+      setExpandedTeam(null);
+      return;
+    }
+    setExpandedTeam(teamId);
+    setAddMemberEmail("");
+    setMemberError("");
+    try {
+      const { team } = await api.getTeam(teamId);
+      setTeamMembers((prev) => ({ ...prev, [teamId]: team.members as { id: string; email: string; name: string | null }[] }));
+    } catch { /* ignore */ }
+  };
+
+  const handleAddMember = async (teamId: string) => {
+    if (!addMemberEmail.trim()) return;
+    setMemberError("");
+    try {
+      await api.addTeamMember(teamId, addMemberEmail.trim());
+      setAddMemberEmail("");
+      // Reload team members
+      const { team } = await api.getTeam(teamId);
+      setTeamMembers((prev) => ({ ...prev, [teamId]: team.members as { id: string; email: string; name: string | null }[] }));
+    } catch (e) {
+      setMemberError(e instanceof Error ? e.message : "Failed to add member");
+    }
+  };
+
+  const handleRemoveMember = async (teamId: string, userId: string) => {
+    try {
+      await api.removeTeamMember(teamId, userId);
+      const { team } = await api.getTeam(teamId);
+      setTeamMembers((prev) => ({ ...prev, [teamId]: team.members as { id: string; email: string; name: string | null }[] }));
+    } catch { /* ignore */ }
   };
 
   const handleCreateTeam = async () => {
@@ -345,7 +385,50 @@ function ProfileMenu() {
               <div className="profile-empty">No teams yet</div>
             )}
             {teams.map((t) => (
-              <div key={t.id} className="profile-team-item">{t.name}</div>
+              <div key={t.id} className="profile-team-card">
+                <button
+                  className="profile-team-header"
+                  onClick={() => handleExpandTeam(t.id)}
+                >
+                  <span>{t.name}</span>
+                  <span className="profile-team-chevron">{expandedTeam === t.id ? "▾" : "▸"}</span>
+                </button>
+
+                {expandedTeam === t.id && (
+                  <div className="profile-team-body">
+                    {/* Member list */}
+                    {(teamMembers[t.id] || []).map((m) => (
+                      <div key={m.id} className="profile-member">
+                        <span className="profile-member-info">
+                          <span className="profile-member-name">{m.name || m.email.split("@")[0]}</span>
+                          <span className="profile-member-email">{m.email}</span>
+                        </span>
+                        <button
+                          className="profile-member-remove"
+                          onClick={() => handleRemoveMember(t.id, m.id)}
+                          title="Remove member"
+                        >
+                          x
+                        </button>
+                      </div>
+                    ))}
+
+                    {/* Add member search */}
+                    <UserSearchInput
+                      onSelect={async (userId, email) => {
+                        try {
+                          await api.addTeamMember(t.id, email);
+                          const { team } = await api.getTeam(t.id);
+                          setTeamMembers((prev) => ({ ...prev, [t.id]: team.members as { id: string; email: string; name: string | null }[] }));
+                        } catch (e) {
+                          setMemberError(e instanceof Error ? e.message : "Failed");
+                        }
+                      }}
+                    />
+                    {memberError && <div className="auth-error" style={{ padding: "2px 0" }}>{memberError}</div>}
+                  </div>
+                )}
+              </div>
             ))}
             <div className="profile-name-edit">
               <input
@@ -398,5 +481,65 @@ function ThemeSelector() {
         </SelectGroup>
       </SelectContent>
     </Select>
+  );
+}
+
+/** Search-as-you-type user picker for adding team members. */
+function UserSearchInput({ onSelect }: { onSelect: (userId: string, email: string) => void }) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<api.UserSearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleChange = (value: string) => {
+    setQuery(value);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+
+    if (value.trim().length < 2) {
+      setResults([]);
+      return;
+    }
+
+    setSearching(true);
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const { users } = await api.searchUsers(value.trim());
+        setResults(users);
+      } catch {
+        setResults([]);
+      } finally {
+        setSearching(false);
+      }
+    }, 300);
+  };
+
+  return (
+    <div className="user-search">
+      <input
+        className="auth-input"
+        placeholder="Add member (search name or email)"
+        value={query}
+        onChange={(e) => handleChange(e.target.value)}
+      />
+      {(results.length > 0 || searching) && (
+        <div className="user-search-results">
+          {searching && <div className="user-search-item user-search-loading">Searching...</div>}
+          {results.map((u) => (
+            <button
+              key={u.id}
+              className="user-search-item"
+              onClick={() => {
+                onSelect(u.id, u.email);
+                setQuery("");
+                setResults([]);
+              }}
+            >
+              <span className="user-search-name">{u.name || u.email.split("@")[0]}</span>
+              <span className="user-search-email">{u.email}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

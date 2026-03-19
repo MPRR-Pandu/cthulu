@@ -1,0 +1,167 @@
+<h2>Theme Dropdown Improvement</h2>
+<p class="subtitle">The current dropdown shows plain text labels with no visual preview. Which style of improvement appeals to you?</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Color Swatch Dots</h3>
+      <p>Add small colored circles next to each theme name showing the theme's background, accent, and text colors. Minimal change -- stays in the existing Select component.</p>
+      <div style="margin-top:12px; display:flex; flex-direction:column; gap:8px; padding:12px; border-radius:8px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1);">
+        <!-- Mock dropdown items -->
+        <div style="display:flex; align-items:center; gap:8px; padding:4px 8px; border-radius:4px;">
+          <div style="display:flex; gap:3px;">
+            <span style="width:10px;height:10px;border-radius:50%;background:#0b1317;border:1px solid #24404c;display:inline-block;"></span>
+            <span style="width:10px;height:10px;border-radius:50%;background:#4ec9b0;display:inline-block;"></span>
+            <span style="width:10px;height:10px;border-radius:50%;background:#d1e1e8;display:inline-block;"></span>
+          </div>
+          <span style="font-size:13px;color:#d1e1e8;">Eldritch</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px; padding:4px 8px; border-radius:4px;">
+          <div style="display:flex; gap:3px;">
+            <span style="width:10px;height:10px;border-radius:50%;background:#110e20;border:1px solid #362e58;display:inline-block;"></span>
+            <span style="width:10px;height:10px;border-radius:50%;background:#b496ff;display:inline-block;"></span>
+            <span style="width:10px;height:10px;border-radius:50%;background:#e0daf0;display:inline-block;"></span>
+          </div>
+          <span style="font-size:13px;color:#e0daf0;">Cosmic</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px; padding:4px 8px; border-radius:4px;">
+          <div style="display:flex; gap:3px;">
+            <span style="width:10px;height:10px;border-radius:50%;background:#282a36;border:1px solid #44475a;display:inline-block;"></span>
+            <span style="width:10px;height:10px;border-radius:50%;background:#8be9fd;display:inline-block;"></span>
+            <span style="width:10px;height:10px;border-radius:50%;background:#f8f8f2;display:inline-block;"></span>
+          </div>
+          <span style="font-size:13px;color:#f8f8f2;">Dracula</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Color Bar Preview</h3>
+      <p>Each item shows a horizontal gradient bar sampling the theme's key colors (bg, accent, success, danger, executor). More visual impact, still fits in the Select dropdown.</p>
+      <div style="margin-top:12px; display:flex; flex-direction:column; gap:8px; padding:12px; border-radius:8px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1);">
+        <div style="display:flex; align-items:center; gap:10px; padding:4px 8px;">
+          <div style="display:flex; width:60px; height:14px; border-radius:3px; overflow:hidden;">
+            <span style="flex:1;background:#0b1317;"></span>
+            <span style="flex:1;background:#4ec9b0;"></span>
+            <span style="flex:1;background:#5bb98c;"></span>
+            <span style="flex:1;background:#9d8ce0;"></span>
+            <span style="flex:1;background:#f07068;"></span>
+          </div>
+          <span style="font-size:13px;color:#d1e1e8;">Eldritch</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:10px; padding:4px 8px;">
+          <div style="display:flex; width:60px; height:14px; border-radius:3px; overflow:hidden;">
+            <span style="flex:1;background:#110e20;"></span>
+            <span style="flex:1;background:#b496ff;"></span>
+            <span style="flex:1;background:#5ae8a0;"></span>
+            <span style="flex:1;background:#5ab8ff;"></span>
+            <span style="flex:1;background:#ff5a6a;"></span>
+          </div>
+          <span style="font-size:13px;color:#e0daf0;">Cosmic</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:10px; padding:4px 8px;">
+          <div style="display:flex; width:60px; height:14px; border-radius:3px; overflow:hidden;">
+            <span style="flex:1;background:#282a36;"></span>
+            <span style="flex:1;background:#8be9fd;"></span>
+            <span style="flex:1;background:#50fa7b;"></span>
+            <span style="flex:1;background:#bd93f9;"></span>
+            <span style="flex:1;background:#ff5555;"></span>
+          </div>
+          <span style="font-size:13px;color:#f8f8f2;">Dracula</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Mini Preview Cards (Popover Grid)</h3>
+      <p>Replace the Select dropdown entirely with a Popover showing a grid of mini theme previews -- each card shows a tiny mockup of the app chrome (top bar, sidebar, canvas) in that theme's colors. Click a card to switch.</p>
+      <div style="margin-top:12px; display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; padding:12px; border-radius:8px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1);">
+        <!-- Eldritch card -->
+        <div style="border-radius:6px; overflow:hidden; border:1px solid #24404c;">
+          <div style="height:8px; background:#111e25; display:flex; align-items:center; padding:0 4px;">
+            <span style="width:3px;height:3px;border-radius:50%;background:#4ec9b0;display:inline-block;"></span>
+          </div>
+          <div style="display:flex; height:30px;">
+            <div style="width:12px; background:#111e25; border-right:1px solid #24404c;"></div>
+            <div style="flex:1; background:#0b1317; display:flex; align-items:center; justify-content:center;">
+              <div style="width:16px; height:2px; border-radius:1px; background:#24404c;"></div>
+            </div>
+          </div>
+          <div style="text-align:center; padding:3px; background:#111e25; font-size:9px; color:#d1e1e8;">Eldritch</div>
+        </div>
+        <!-- Cosmic card -->
+        <div style="border-radius:6px; overflow:hidden; border:1px solid #362e58;">
+          <div style="height:8px; background:#1a1530; display:flex; align-items:center; padding:0 4px;">
+            <span style="width:3px;height:3px;border-radius:50%;background:#b496ff;display:inline-block;"></span>
+          </div>
+          <div style="display:flex; height:30px;">
+            <div style="width:12px; background:#1a1530; border-right:1px solid #362e58;"></div>
+            <div style="flex:1; background:#110e20; display:flex; align-items:center; justify-content:center;">
+              <div style="width:16px; height:2px; border-radius:1px; background:#362e58;"></div>
+            </div>
+          </div>
+          <div style="text-align:center; padding:3px; background:#1a1530; font-size:9px; color:#e0daf0;">Cosmic</div>
+        </div>
+        <!-- Dracula card -->
+        <div style="border-radius:6px; overflow:hidden; border:1px solid #44475a;">
+          <div style="height:8px; background:#21222c; display:flex; align-items:center; padding:0 4px;">
+            <span style="width:3px;height:3px;border-radius:50%;background:#8be9fd;display:inline-block;"></span>
+          </div>
+          <div style="display:flex; height:30px;">
+            <div style="width:12px; background:#21222c; border-right:1px solid #44475a;"></div>
+            <div style="flex:1; background:#282a36; display:flex; align-items:center; justify-content:center;">
+              <div style="width:16px; height:2px; border-radius:1px; background:#44475a;"></div>
+            </div>
+          </div>
+          <div style="text-align:center; padding:3px; background:#21222c; font-size:9px; color:#f8f8f2;">Dracula</div>
+        </div>
+        <!-- Nord card -->
+        <div style="border-radius:6px; overflow:hidden; border:1px solid #4c566a;">
+          <div style="height:8px; background:#3b4252; display:flex; align-items:center; padding:0 4px;">
+            <span style="width:3px;height:3px;border-radius:50%;background:#88c0d0;display:inline-block;"></span>
+          </div>
+          <div style="display:flex; height:30px;">
+            <div style="width:12px; background:#3b4252; border-right:1px solid #4c566a;"></div>
+            <div style="flex:1; background:#2e3440; display:flex; align-items:center; justify-content:center;">
+              <div style="width:16px; height:2px; border-radius:1px; background:#4c566a;"></div>
+            </div>
+          </div>
+          <div style="text-align:center; padding:3px; background:#3b4252; font-size:9px; color:#eceff4;">Nord</div>
+        </div>
+        <!-- Solarized Light card -->
+        <div style="border-radius:6px; overflow:hidden; border:1px solid #93a1a1;">
+          <div style="height:8px; background:#eee8d5; display:flex; align-items:center; padding:0 4px;">
+            <span style="width:3px;height:3px;border-radius:50%;background:#268bd2;display:inline-block;"></span>
+          </div>
+          <div style="display:flex; height:30px;">
+            <div style="width:12px; background:#eee8d5; border-right:1px solid #93a1a1;"></div>
+            <div style="flex:1; background:#fdf6e3; display:flex; align-items:center; justify-content:center;">
+              <div style="width:16px; height:2px; border-radius:1px; background:#93a1a1;"></div>
+            </div>
+          </div>
+          <div style="text-align:center; padding:3px; background:#eee8d5; font-size:9px; color:#073642;">Sol. Light</div>
+        </div>
+        <!-- Harry Potter card -->
+        <div style="border-radius:6px; overflow:hidden; border:1px solid rgba(201,168,76,0.25);">
+          <div style="height:8px; background:#12121a; display:flex; align-items:center; padding:0 4px;">
+            <span style="width:3px;height:3px;border-radius:50%;background:#c9a84c;display:inline-block;"></span>
+          </div>
+          <div style="display:flex; height:30px;">
+            <div style="width:12px; background:#12121a; border-right:1px solid rgba(201,168,76,0.25);"></div>
+            <div style="flex:1; background:#0a0a0f; display:flex; align-items:center; justify-content:center;">
+              <div style="width:16px; height:2px; border-radius:1px; background:rgba(201,168,76,0.25);"></div>
+            </div>
+          </div>
+          <div style="text-align:center; padding:3px; background:#12121a; font-size:9px; color:#f5e6c8;">H. Potter</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

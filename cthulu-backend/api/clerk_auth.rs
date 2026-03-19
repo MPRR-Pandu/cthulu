@@ -227,6 +227,7 @@ pub fn router() -> Router<AppState> {
         .route("/auth/signup", post(signup))
         .route("/auth/login", post(login))
         .route("/auth/me", get(get_profile).put(update_profile))
+        .route("/auth/users/search", get(search_users))
 }
 
 async fn signup(
@@ -410,6 +411,37 @@ async fn update_profile(
         "name": updated.name,
         "avatar_url": updated.avatar_url,
     })))
+}
+
+// ── User Search ──────────────────────────────────────────────
+
+/// GET /api/auth/users/search?q=alice
+/// Searches users by email or name. Returns max 10 results. Requires auth.
+async fn search_users(
+    _auth: AuthUser,
+    axum::extract::State(state): axum::extract::State<AppState>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> (StatusCode, Json<Value>) {
+    let query = params.get("q").map(|s| s.trim().to_lowercase()).unwrap_or_default();
+    if query.is_empty() {
+        return (StatusCode::OK, Json(json!({ "users": [] })));
+    }
+
+    let store = state.user_store.read().await;
+    let results: Vec<Value> = store.users.values()
+        .filter(|u| {
+            u.email.to_lowercase().contains(&query)
+                || u.name.as_ref().map(|n| n.to_lowercase().contains(&query)).unwrap_or(false)
+        })
+        .take(10)
+        .map(|u| json!({
+            "id": u.id,
+            "email": u.email,
+            "name": u.name,
+        }))
+        .collect();
+
+    (StatusCode::OK, Json(json!({ "users": results })))
 }
 
 // ── Tests ────────────────────────────────────────────────────

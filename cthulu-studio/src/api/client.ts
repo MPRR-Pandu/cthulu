@@ -758,6 +758,16 @@ export async function updateProfile(data: {
   });
 }
 
+export interface UserSearchResult {
+  id: string;
+  email: string;
+  name: string | null;
+}
+
+export async function searchUsers(query: string): Promise<{ users: UserSearchResult[] }> {
+  return apiFetch<{ users: UserSearchResult[] }>(`/auth/users/search?q=${encodeURIComponent(query)}`);
+}
+
 // ── Teams ────────────────────────────────────────────────────
 
 export interface TeamMember {

@@ -17,7 +17,8 @@ use tokio::process::Command;
 use crate::api::AppState;
 
 /// Timeout for the Python sidecar (Slack message fetching).
-const SIDECAR_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+/// 60s to account for --with-threads: each threaded message incurs an API call + 0.4s sleep.
+const SIDECAR_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 /// Timeout for the Claude CLI (AI summary generation).
 const CLAUDE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 
@@ -329,7 +330,7 @@ Keep each summary under 100 words. Focus on what matters: decisions made, proble
         .env_remove("CLAUDECODE")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| {
             tracing::error!(error = %e, "failed to spawn claude for dashboard summary");
@@ -364,6 +365,15 @@ Keep each summary under 100 words. Focus on what matters: decisions made, proble
             output.push('\n');
         }
 
+        // Read stderr for diagnostics (auth errors, version mismatches, etc.)
+        let mut stderr_output = String::new();
+        if let Some(stderr) = child.stderr.take() {
+            let mut stderr_reader = BufReader::new(stderr);
+            let mut buf = String::new();
+            let _ = tokio::io::AsyncReadExt::read_to_string(&mut stderr_reader, &mut buf).await;
+            stderr_output = buf;
+        }
+
         let status = child.wait().await.map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -372,9 +382,15 @@ Keep each summary under 100 words. Focus on what matters: decisions made, proble
         })?;
 
         if !status.success() {
+            if !stderr_output.is_empty() {
+                tracing::error!(stderr = %stderr_output, "claude CLI failed");
+            }
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("claude exited with {status}") })),
+                Json(json!({
+                    "error": format!("claude exited with {status}"),
+                    "stderr": stderr_output,
+                })),
             ));
         }
 
@@ -570,8 +586,8 @@ mod tests {
 
     #[test]
     fn timeout_constants_are_reasonable() {
-        assert!(SIDECAR_TIMEOUT.as_secs() >= 10, "sidecar timeout too short");
-        assert!(SIDECAR_TIMEOUT.as_secs() <= 60, "sidecar timeout too long");
+        assert!(SIDECAR_TIMEOUT.as_secs() >= 30, "sidecar timeout too short for threaded fetches");
+        assert!(SIDECAR_TIMEOUT.as_secs() <= 120, "sidecar timeout too long");
         assert!(CLAUDE_TIMEOUT.as_secs() >= 60, "claude timeout too short");
         assert!(CLAUDE_TIMEOUT.as_secs() <= 300, "claude timeout too long");
     }

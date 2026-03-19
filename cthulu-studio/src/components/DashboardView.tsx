@@ -189,9 +189,9 @@ export default function DashboardView() {
     }
   };
 
-  const handleRefresh = () => {
+  const handleRefresh = async () => {
     setSummaries([]);
-    loadMessages();
+    await loadMessages();
   };
 
   const handleSummarize = () => {

@@ -1,8 +1,36 @@
-import { useState } from "react";
+import { useState, useCallback, createContext, useContext } from "react";
 import { setAuthTokenGetter, getServerUrl } from "../api/client";
+
+// ── Auth context so any component can call logout ────────────
+
+interface AuthContextValue {
+  logout: () => void;
+  userEmail: string | null;
+}
+
+const AuthContext = createContext<AuthContextValue>({
+  logout: () => {},
+  userEmail: null,
+});
+
+/** Hook for any component to access logout + user info. */
+export function useAuth() {
+  return useContext(AuthContext);
+}
 
 interface AuthGateProps {
   children: React.ReactNode;
+}
+
+/** Parse email from JWT payload (base64url-encoded middle segment). */
+function emailFromToken(token: string): string | null {
+  try {
+    const payload = token.split(".")[1];
+    const json = atob(payload.replace(/-/g, "+").replace(/_/g, "/"));
+    return JSON.parse(json).email || null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -16,11 +44,21 @@ export default function AuthGate({ children }: AuthGateProps) {
     () => localStorage.getItem("cthulu_auth_token"),
   );
 
+  const logout = useCallback(() => {
+    localStorage.removeItem("cthulu_auth_token");
+    setAuthTokenGetter(null);
+    setToken(null);
+  }, []);
+
   if (!authEnabled) return <>{children}</>;
+
   if (token) {
-    // Set token getter so all API requests include it
     setAuthTokenGetter(() => Promise.resolve(token));
-    return <>{children}</>;
+    return (
+      <AuthContext.Provider value={{ logout, userEmail: emailFromToken(token) }}>
+        {children}
+      </AuthContext.Provider>
+    );
   }
 
   return <AuthForm onSuccess={(t) => {

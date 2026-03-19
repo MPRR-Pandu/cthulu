@@ -10,6 +10,7 @@ pub mod middleware;
 pub mod prompts;
 mod routes;
 pub mod scheduler;
+pub mod teams;
 pub mod templates;
 pub mod user_context;
 
@@ -338,6 +339,8 @@ pub struct AppState {
     pub jwt_secret: String,
     /// In-memory user store (email/password accounts).
     pub user_store: Arc<RwLock<clerk_auth::UserStore>>,
+    /// In-memory team store.
+    pub team_store: Arc<RwLock<teams::TeamStore>>,
 }
 
 impl AppState {

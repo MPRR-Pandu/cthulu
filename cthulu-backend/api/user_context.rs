@@ -1,19 +1,19 @@
 //! Per-user directory and key helpers for multi-tenant data isolation.
 //!
-//! When auth is enabled (CLERK_DOMAIN set), data is namespaced under
+//! When AUTH_ENABLED=true, data is namespaced under
 //! `~/.cthulu/users/{user_id}/`. When disabled (dev mode), uses the
 //! flat legacy structure at `~/.cthulu/`.
 
 use std::path::PathBuf;
 
-use crate::api::clerk_auth::AuthUser;
+use crate::api::clerk_auth::{auth_enabled, AuthUser};
 use crate::api::AppState;
 
 /// Returns the per-user data directory.
-/// Dev mode (no clerk_domain): returns `state.data_dir` directly.
+/// Dev mode: returns `state.data_dir` directly.
 /// Auth mode: returns `state.data_dir/users/{user_id}`.
 pub fn user_data_dir(state: &AppState, auth: &AuthUser) -> PathBuf {
-    if state.clerk_domain.is_some() {
+    if auth_enabled() {
         state.data_dir.join("users").join(&auth.user_id)
     } else {
         state.data_dir.clone()
@@ -21,9 +21,9 @@ pub fn user_data_dir(state: &AppState, auth: &AuthUser) -> PathBuf {
 }
 
 /// Prefix an in-memory key with user_id for multi-tenant isolation.
-/// Dev mode: returns the key unchanged (backward compatible).
-pub fn user_key(state: &AppState, auth: &AuthUser, key: &str) -> String {
-    if state.clerk_domain.is_some() {
+/// Dev mode: returns the key unchanged.
+pub fn user_key(auth: &AuthUser, key: &str) -> String {
+    if auth_enabled() {
         format!("{}::{}", auth.user_id, key)
     } else {
         key.to_string()
@@ -46,16 +46,13 @@ mod tests {
     #[test]
     fn user_data_dir_path_construction() {
         let base = PathBuf::from("/tmp/cthulu");
-        let user_id = "user_abc";
-        let result = base.join("users").join(user_id);
+        let result = base.join("users").join("user_abc");
         assert_eq!(result, PathBuf::from("/tmp/cthulu/users/user_abc"));
     }
 
     #[test]
     fn user_key_format() {
-        let user_id = "user_abc";
-        let key = "agent::123";
-        let result = format!("{user_id}::{key}");
+        let result = format!("{}::{}", "user_abc", "agent::123");
         assert_eq!(result, "user_abc::agent::123");
     }
 

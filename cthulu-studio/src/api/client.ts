@@ -37,6 +37,22 @@ export function getServerUrl(): string {
   return getBaseUrl();
 }
 
+// ── Auth token injection ─────────────────────────────────────
+
+let getTokenFn: (() => Promise<string | null>) | null = null;
+
+/** Called by AuthGate to wire Clerk's getToken into all API requests. */
+export function setAuthTokenGetter(fn: (() => Promise<string | null>) | null) {
+  getTokenFn = fn;
+}
+
+/** Get the current auth token (if available). Used by SSE EventSource callers. */
+export async function getAuthToken(): Promise<string | null> {
+  return getTokenFn ? getTokenFn() : null;
+}
+
+// ── API fetch wrapper ────────────────────────────────────────
+
 async function apiFetch<T>(
   path: string,
   options: RequestInit = {}
@@ -47,11 +63,21 @@ async function apiFetch<T>(
   log("http", `${method} ${path}`);
   const start = performance.now();
 
+  // Attach auth token if available
+  const authHeaders: Record<string, string> = {};
+  if (getTokenFn) {
+    const token = await getTokenFn();
+    if (token) {
+      authHeaders["Authorization"] = `Bearer ${token}`;
+    }
+  }
+
   try {
     const res = await fetch(url, {
       ...options,
       headers: {
         "Content-Type": "application/json",
+        ...authHeaders,
         ...options.headers,
       },
     });

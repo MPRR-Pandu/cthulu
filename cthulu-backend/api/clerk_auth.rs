@@ -1,89 +1,127 @@
-//! Clerk JWT verification and AuthUser extractor.
+//! Self-hosted authentication: signup, login, JWT issuance + verification.
 //!
-//! When `CLERK_DOMAIN` is set, verifies Clerk JWTs via JWKS.
-//! When unset (local dev), returns a hardcoded dev user — fully backward compatible.
+//! Users stored in `{data_dir}/users.json`. Passwords hashed with bcrypt.
+//! JWTs signed with a server-generated secret stored in `{data_dir}/jwt_secret`.
+//!
+//! When `AUTH_ENABLED` env var is not "true" (default), auth is bypassed
+//! and all requests get a hardcoded "dev_user" identity.
 
 use axum::extract::FromRequestParts;
-use hyper::StatusCode;
-use axum::Json;
+use axum::routing::post;
+use axum::{Json, Router};
 use hyper::header::AUTHORIZATION;
 use hyper::http::request::Parts;
-use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
+use hyper::StatusCode;
+use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Instant;
 use tokio::sync::RwLock;
 
 use crate::api::AppState;
 
-// ── JWKS Cache ───────────────────────────────────────────────
+// ── User Store ───────────────────────────────────────────────
 
-/// Cached JWKS keys fetched from Clerk's well-known endpoint.
-pub struct JwksCache {
-    /// kid -> DecodingKey
-    pub keys: HashMap<String, DecodingKey>,
-    pub fetched_at: Instant,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoredUser {
+    pub id: String,
+    pub email: String,
+    pub password_hash: String,
+    pub created_at: String,
 }
 
-const JWKS_TTL_SECS: u64 = 3600; // 1 hour
+/// In-memory user store backed by `{data_dir}/users.json`.
+pub struct UserStore {
+    pub users: HashMap<String, StoredUser>, // email -> StoredUser
+}
 
-/// Fetch JWKS from Clerk and build a cache of kid -> DecodingKey.
-pub async fn fetch_jwks(
-    http_client: &reqwest::Client,
-    clerk_domain: &str,
-) -> Result<JwksCache, String> {
-    let url = format!("https://{}/.well-known/jwks.json", clerk_domain);
-    let resp = http_client
-        .get(&url)
-        .send()
-        .await
-        .map_err(|e| format!("JWKS fetch failed: {e}"))?;
-
-    if !resp.status().is_success() {
-        return Err(format!("JWKS endpoint returned {}", resp.status()));
+impl UserStore {
+    pub fn load(data_dir: &PathBuf) -> Self {
+        let path = data_dir.join("users.json");
+        let users = match std::fs::read_to_string(&path) {
+            Ok(contents) => serde_json::from_str(&contents).unwrap_or_default(),
+            Err(_) => HashMap::new(),
+        };
+        Self { users }
     }
 
-    let body: Value = resp
-        .json()
-        .await
-        .map_err(|e| format!("JWKS parse failed: {e}"))?;
+    pub fn save(&self, data_dir: &PathBuf) -> std::io::Result<()> {
+        let path = data_dir.join("users.json");
+        let json = serde_json::to_string_pretty(&self.users)?;
+        std::fs::write(path, json)
+    }
 
-    let mut keys = HashMap::new();
-    if let Some(jwks_keys) = body.get("keys").and_then(|k| k.as_array()) {
-        for key in jwks_keys {
-            let kid = key.get("kid").and_then(|k| k.as_str()).unwrap_or_default();
-            let n = key.get("n").and_then(|v| v.as_str()).unwrap_or_default();
-            let e = key.get("e").and_then(|v| v.as_str()).unwrap_or_default();
+    pub fn find_by_email(&self, email: &str) -> Option<&StoredUser> {
+        self.users.get(email)
+    }
 
-            if !kid.is_empty() && !n.is_empty() && !e.is_empty() {
-                if let Ok(dk) = DecodingKey::from_rsa_components(n, e) {
-                    keys.insert(kid.to_string(), dk);
-                }
-            }
+    pub fn insert(&mut self, user: StoredUser) {
+        self.users.insert(user.email.clone(), user);
+    }
+}
+
+// ── JWT ──────────────────────────────────────────────────────
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Claims {
+    sub: String, // user_id
+    email: String,
+    exp: usize,
+}
+
+const JWT_EXPIRY_HOURS: i64 = 24;
+
+/// Load or generate the JWT signing secret.
+pub fn load_or_create_jwt_secret(data_dir: &PathBuf) -> String {
+    let path = data_dir.join("jwt_secret");
+    match std::fs::read_to_string(&path) {
+        Ok(secret) if !secret.trim().is_empty() => secret.trim().to_string(),
+        _ => {
+            let secret = uuid::Uuid::new_v4().to_string();
+            let _ = std::fs::write(&path, &secret);
+            secret
         }
     }
+}
 
-    if keys.is_empty() {
-        return Err("No valid RSA keys found in JWKS".to_string());
-    }
+fn issue_jwt(user: &StoredUser, secret: &str) -> Result<String, String> {
+    let exp = chrono::Utc::now()
+        .checked_add_signed(chrono::Duration::hours(JWT_EXPIRY_HOURS))
+        .ok_or("time overflow")?
+        .timestamp() as usize;
 
-    Ok(JwksCache {
-        keys,
-        fetched_at: Instant::now(),
-    })
+    let claims = Claims {
+        sub: user.id.clone(),
+        email: user.email.clone(),
+        exp,
+    };
+
+    encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(secret.as_bytes()),
+    )
+    .map_err(|e| format!("JWT encode failed: {e}"))
+}
+
+fn verify_jwt(token: &str, secret: &str) -> Result<Claims, String> {
+    let mut validation = Validation::new(Algorithm::HS256);
+    validation.validate_aud = false;
+
+    decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(secret.as_bytes()),
+        &validation,
+    )
+    .map(|data| data.claims)
+    .map_err(|e| format!("JWT verify failed: {e}"))
 }
 
 // ── AuthUser Extractor ───────────────────────────────────────
 
-/// Clerk JWT claims we care about.
-#[derive(Debug, Deserialize)]
-struct ClerkClaims {
-    sub: String,
-}
-
-/// Authenticated user extracted from Clerk JWT.
+/// Authenticated user extracted from JWT.
 /// When auth is disabled (dev mode), user_id is "dev_user".
 #[derive(Debug, Clone, Serialize)]
 pub struct AuthUser {
@@ -98,6 +136,12 @@ impl AuthUser {
     }
 }
 
+pub fn auth_enabled() -> bool {
+    std::env::var("AUTH_ENABLED")
+        .map(|v| v == "true")
+        .unwrap_or(false)
+}
+
 impl FromRequestParts<AppState> for AuthUser {
     type Rejection = (StatusCode, Json<Value>);
 
@@ -105,19 +149,14 @@ impl FromRequestParts<AppState> for AuthUser {
         parts: &mut Parts,
         state: &AppState,
     ) -> impl std::future::Future<Output = Result<Self, Self::Rejection>> + Send {
-        let clerk_domain = state.clerk_domain.clone();
-        let jwks_cache = state.jwks_cache.clone();
-        let http_client = state.http_client.clone();
-
-        // Extract token from header or query param before the async block
+        let jwt_secret = state.jwt_secret.clone();
+        let auth_on = auth_enabled();
         let token = extract_token(parts);
 
         async move {
-            // Dev mode: no Clerk domain configured → bypass auth
-            let clerk_domain = match clerk_domain {
-                Some(d) => d,
-                None => return Ok(AuthUser::dev_user()),
-            };
+            if !auth_on {
+                return Ok(AuthUser::dev_user());
+            }
 
             let token = token.ok_or_else(|| {
                 (
@@ -126,67 +165,28 @@ impl FromRequestParts<AppState> for AuthUser {
                 )
             })?;
 
-            // Decode JWT header to get kid
-            let header = decode_header(&token).map_err(|e| {
-                (
-                    StatusCode::UNAUTHORIZED,
-                    Json(json!({ "error": format!("Invalid token header: {e}") })),
-                )
-            })?;
-
-            let kid = header.kid.ok_or_else(|| {
-                (
-                    StatusCode::UNAUTHORIZED,
-                    Json(json!({ "error": "Token missing kid" })),
-                )
-            })?;
-
-            // Get decoding key from cache (or fetch)
-            let decoding_key = get_decoding_key(
-                &jwks_cache,
-                &http_client,
-                &clerk_domain,
-                &kid,
-            )
-            .await
-            .map_err(|e| {
+            let claims = verify_jwt(&token, &jwt_secret).map_err(|e| {
                 (
                     StatusCode::UNAUTHORIZED,
                     Json(json!({ "error": e })),
                 )
             })?;
 
-            // Verify the JWT
-            let mut validation = Validation::new(Algorithm::RS256);
-            validation.set_issuer(&[format!("https://{clerk_domain}")]);
-            validation.validate_aud = false; // Clerk doesn't always set aud
-
-            let token_data = decode::<ClerkClaims>(&token, &decoding_key, &validation)
-                .map_err(|e| {
-                    (
-                        StatusCode::UNAUTHORIZED,
-                        Json(json!({ "error": format!("Token verification failed: {e}") })),
-                    )
-                })?;
-
-            let user_id = token_data.claims.sub;
-
             // Validate user_id is safe for filesystem paths
-            if !user_id.chars().all(|c| c.is_alphanumeric() || c == '_') {
+            if !claims.sub.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') {
                 return Err((
                     StatusCode::UNAUTHORIZED,
                     Json(json!({ "error": "Invalid user ID format" })),
                 ));
             }
 
-            Ok(AuthUser { user_id })
+            Ok(AuthUser { user_id: claims.sub })
         }
     }
 }
 
 /// Extract Bearer token from Authorization header or ?token query param.
 fn extract_token(parts: &Parts) -> Option<String> {
-    // Try Authorization header first
     if let Some(auth_header) = parts.headers.get(AUTHORIZATION) {
         if let Ok(value) = auth_header.to_str() {
             if let Some(token) = value.strip_prefix("Bearer ") {
@@ -195,11 +195,10 @@ fn extract_token(parts: &Parts) -> Option<String> {
         }
     }
 
-    // Fall back to ?token= query param (for SSE EventSource)
     if let Some(query) = parts.uri.query() {
         for pair in query.split('&') {
             if let Some(token) = pair.strip_prefix("token=") {
-                return Some(urlencoding_decode(token));
+                return Some(token.to_string());
             }
         }
     }
@@ -207,56 +206,143 @@ fn extract_token(parts: &Parts) -> Option<String> {
     None
 }
 
-/// Simple percent-decoding for the token query param.
-fn urlencoding_decode(s: &str) -> String {
-    // Tokens are base64url, which doesn't need decoding in practice,
-    // but handle %XX just in case.
-    let mut result = String::with_capacity(s.len());
-    let mut chars = s.chars();
-    while let Some(c) = chars.next() {
-        if c == '%' {
-            let hex: String = chars.by_ref().take(2).collect();
-            if let Ok(byte) = u8::from_str_radix(&hex, 16) {
-                result.push(byte as char);
-            }
-        } else if c == '+' {
-            result.push(' ');
-        } else {
-            result.push(c);
-        }
-    }
-    result
+// ── HTTP Handlers ────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct SignupRequest {
+    email: String,
+    password: String,
 }
 
-/// Get a DecodingKey for the given kid, fetching/refreshing JWKS as needed.
-async fn get_decoding_key(
-    cache: &Arc<RwLock<Option<JwksCache>>>,
-    http_client: &reqwest::Client,
-    clerk_domain: &str,
-    kid: &str,
-) -> Result<DecodingKey, String> {
-    // Try cache first
+#[derive(Deserialize)]
+struct LoginRequest {
+    email: String,
+    password: String,
+}
+
+pub fn router() -> Router<AppState> {
+    Router::new()
+        .route("/auth/signup", post(signup))
+        .route("/auth/login", post(login))
+}
+
+async fn signup(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Json(body): Json<SignupRequest>,
+) -> (StatusCode, Json<Value>) {
+    if body.email.trim().is_empty() || body.password.len() < 8 {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Email required, password must be 8+ characters" })),
+        );
+    }
+
+    let email = body.email.trim().to_lowercase();
+
+    // Check if user exists
     {
-        let guard = cache.read().await;
-        if let Some(ref jwks) = *guard {
-            if jwks.fetched_at.elapsed().as_secs() < JWKS_TTL_SECS {
-                if let Some(key) = jwks.keys.get(kid) {
-                    return Ok(key.clone());
-                }
-            }
+        let store = state.user_store.read().await;
+        if store.find_by_email(&email).is_some() {
+            return (
+                StatusCode::CONFLICT,
+                Json(json!({ "error": "User already exists" })),
+            );
         }
     }
 
-    // Cache miss or expired — fetch fresh JWKS
-    let fresh = fetch_jwks(http_client, clerk_domain).await?;
-    let key = fresh.keys.get(kid).cloned();
+    // Hash password
+    let password_hash = match bcrypt::hash(&body.password, 12) {
+        Ok(h) => h,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("Hash failed: {e}") })),
+            );
+        }
+    };
+
+    let user = StoredUser {
+        id: uuid::Uuid::new_v4().to_string().replace('-', "_"),
+        email: email.clone(),
+        password_hash,
+        created_at: chrono::Utc::now().to_rfc3339(),
+    };
+
+    // Issue token
+    let token = match issue_jwt(&user, &state.jwt_secret) {
+        Ok(t) => t,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": e })),
+            );
+        }
+    };
+
+    // Save user
     {
-        let mut guard = cache.write().await;
-        *guard = Some(fresh);
+        let mut store = state.user_store.write().await;
+        store.insert(user.clone());
+        let _ = store.save(&state.data_dir);
     }
 
-    key.ok_or_else(|| format!("Key ID '{kid}' not found in JWKS"))
+    (
+        StatusCode::CREATED,
+        Json(json!({
+            "token": token,
+            "user": { "id": user.id, "email": user.email }
+        })),
+    )
 }
+
+async fn login(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Json(body): Json<LoginRequest>,
+) -> (StatusCode, Json<Value>) {
+    let email = body.email.trim().to_lowercase();
+
+    let store = state.user_store.read().await;
+    let user = match store.find_by_email(&email) {
+        Some(u) => u.clone(),
+        None => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({ "error": "Invalid email or password" })),
+            );
+        }
+    };
+    drop(store);
+
+    // Verify password
+    let valid = bcrypt::verify(&body.password, &user.password_hash).unwrap_or(false);
+    if !valid {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "Invalid email or password" })),
+        );
+    }
+
+    // Issue token
+    let token = match issue_jwt(&user, &state.jwt_secret) {
+        Ok(t) => t,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": e })),
+            );
+        }
+    };
+
+    (
+        StatusCode::OK,
+        Json(json!({
+            "token": token,
+            "user": { "id": user.id, "email": user.email }
+        })),
+    )
+}
+
+// ── Tests ────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -305,12 +391,57 @@ mod tests {
     }
 
     #[test]
-    fn urlencoding_decode_passthrough() {
-        assert_eq!(urlencoding_decode("hello_world"), "hello_world");
+    fn jwt_roundtrip() {
+        let secret = "test_secret_123";
+        let user = StoredUser {
+            id: "user_abc".into(),
+            email: "test@example.com".into(),
+            password_hash: "fake".into(),
+            created_at: "2026-01-01T00:00:00Z".into(),
+        };
+        let token = issue_jwt(&user, secret).unwrap();
+        let claims = verify_jwt(&token, secret).unwrap();
+        assert_eq!(claims.sub, "user_abc");
+        assert_eq!(claims.email, "test@example.com");
     }
 
     #[test]
-    fn urlencoding_decode_percent() {
-        assert_eq!(urlencoding_decode("hello%20world"), "hello world");
+    fn jwt_wrong_secret_fails() {
+        let user = StoredUser {
+            id: "user_abc".into(),
+            email: "test@example.com".into(),
+            password_hash: "fake".into(),
+            created_at: "2026-01-01T00:00:00Z".into(),
+        };
+        let token = issue_jwt(&user, "secret1").unwrap();
+        let result = verify_jwt(&token, "secret2");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn user_store_roundtrip() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dir = tmp.path().to_path_buf();
+
+        let mut store = UserStore { users: HashMap::new() };
+        store.insert(StoredUser {
+            id: "u1".into(),
+            email: "a@b.com".into(),
+            password_hash: "hash".into(),
+            created_at: "2026-01-01".into(),
+        });
+        store.save(&dir).unwrap();
+
+        let loaded = UserStore::load(&dir);
+        assert!(loaded.find_by_email("a@b.com").is_some());
+        assert!(loaded.find_by_email("nope@b.com").is_none());
+    }
+
+    #[test]
+    fn bcrypt_hash_and_verify() {
+        let password = "my_secure_password";
+        let hash = bcrypt::hash(password, 4).unwrap(); // low cost for test speed
+        assert!(bcrypt::verify(password, &hash).unwrap());
+        assert!(!bcrypt::verify("wrong_password", &hash).unwrap());
     }
 }

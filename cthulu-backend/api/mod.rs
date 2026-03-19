@@ -334,11 +334,10 @@ pub struct AppState {
     pub global_hook_tx: Arc<broadcast::Sender<String>>,
     /// The port the server is listening on (used in hook URLs).
     pub server_port: u16,
-    /// Clerk domain for JWT verification (e.g., "my-app.clerk.accounts.dev").
-    /// When None, auth is bypassed (local dev mode).
-    pub clerk_domain: Option<String>,
-    /// Cached JWKS keys from Clerk for JWT verification.
-    pub jwks_cache: Arc<RwLock<Option<clerk_auth::JwksCache>>>,
+    /// JWT signing secret for self-hosted auth.
+    pub jwt_secret: String,
+    /// In-memory user store (email/password accounts).
+    pub user_store: Arc<RwLock<clerk_auth::UserStore>>,
 }
 
 impl AppState {

@@ -5,7 +5,7 @@ pub struct Config {
     pub port: u16,
     pub sentry_dsn: Option<String>,
     pub environment: String,
-    pub clerk_domain: Option<String>,
+    pub auth_enabled: bool,
 }
 
 impl Config {
@@ -14,7 +14,7 @@ impl Config {
             std::env::var("PORT").ok().as_deref(),
             std::env::var("SENTRY_DSN").ok().as_deref(),
             std::env::var("ENVIRONMENT").ok().as_deref(),
-            std::env::var("CLERK_DOMAIN").ok().as_deref(),
+            std::env::var("AUTH_ENABLED").ok().as_deref(),
         )
     }
 
@@ -24,7 +24,7 @@ impl Config {
         port: Option<&str>,
         sentry_dsn: Option<&str>,
         environment: Option<&str>,
-        clerk_domain: Option<&str>,
+        auth_enabled: Option<&str>,
     ) -> Self {
         let port = port.and_then(|v| v.parse().ok()).unwrap_or(8081);
 
@@ -35,13 +35,13 @@ impl Config {
             .map(String::from)
             .unwrap_or_else(|| "local".to_string());
 
-        let clerk_domain = clerk_domain.filter(|s| !s.is_empty()).map(String::from);
+        let auth_enabled = auth_enabled.map(|v| v == "true").unwrap_or(false);
 
         Config {
             port,
             sentry_dsn,
             environment,
-            clerk_domain,
+            auth_enabled,
         }
     }
 }
@@ -160,17 +160,14 @@ mod tests {
     }
 
     #[test]
-    fn test_config_clerk_domain() {
-        let config = Config::from_raw_values(None, None, None, Some("my-app.clerk.accounts.dev"));
-        assert_eq!(
-            config.clerk_domain.as_deref(),
-            Some("my-app.clerk.accounts.dev")
-        );
+    fn test_config_auth_enabled_true() {
+        let config = Config::from_raw_values(None, None, None, Some("true"));
+        assert!(config.auth_enabled);
     }
 
     #[test]
-    fn test_config_clerk_domain_empty_is_none() {
-        let config = Config::from_raw_values(None, None, None, Some(""));
-        assert!(config.clerk_domain.is_none());
+    fn test_config_auth_enabled_default_false() {
+        let config = Config::from_raw_values(None, None, None, None);
+        assert!(!config.auth_enabled);
     }
 }

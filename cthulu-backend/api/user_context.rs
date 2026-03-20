@@ -12,6 +12,8 @@ use crate::api::AppState;
 /// Returns the per-user data directory.
 /// Dev mode: returns `state.data_dir` directly.
 /// Auth mode: returns `state.data_dir/users/{user_id}`.
+/// Safety: user_id is validated to [a-zA-Z0-9_-] in AuthUser extractor,
+/// preventing path traversal.
 pub fn user_data_dir(state: &AppState, auth: &AuthUser) -> PathBuf {
     if auth_enabled(state) {
         state.data_dir.join("users").join(&auth.user_id)

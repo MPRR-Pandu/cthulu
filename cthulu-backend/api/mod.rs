@@ -336,8 +336,8 @@ pub struct AppState {
     pub server_port: u16,
     /// Whether auth is enabled (read once at startup from config).
     pub auth_enabled: bool,
-    /// JWT signing secret for self-hosted auth.
-    pub jwt_secret: String,
+    /// JWT signing secret (Arc to avoid cloning on every request extraction).
+    pub jwt_secret: Arc<String>,
     /// In-memory user store (email/password accounts).
     pub user_store: Arc<RwLock<clerk_auth::UserStore>>,
 }

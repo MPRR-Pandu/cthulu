@@ -47,10 +47,13 @@ impl UserStore {
         Self { users }
     }
 
+    /// Atomic save: write to temp file, then rename (crash-safe).
     pub fn save(&self, data_dir: &PathBuf) -> std::io::Result<()> {
         let path = data_dir.join("users.json");
+        let tmp = path.with_extension("json.tmp");
         let json = serde_json::to_string_pretty(&self.users)?;
-        std::fs::write(path, json)
+        std::fs::write(&tmp, json)?;
+        std::fs::rename(&tmp, &path)
     }
 
     pub fn find_by_email(&self, email: &str) -> Option<&StoredUser> {
@@ -316,7 +319,11 @@ async fn login(
     };
     drop(store);
 
-    let valid = bcrypt::verify(&body.password, &user.password_hash).unwrap_or(false);
+    let password = body.password.clone();
+    let hash = user.password_hash.clone();
+    let valid = tokio::task::spawn_blocking(move || bcrypt::verify(&password, &hash).unwrap_or(false))
+        .await
+        .unwrap_or(false);
     if !valid {
         return (
             StatusCode::UNAUTHORIZED,

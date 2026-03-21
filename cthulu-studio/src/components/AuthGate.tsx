@@ -59,7 +59,7 @@ export default function AuthGate({ children }: AuthGateProps) {
   const [token, setToken] = useState<string | null>(() => {
     const t = localStorage.getItem("cthulu_auth_token");
     if (t && isTokenValid(t)) {
-      setAuthTokenGetter(() => Promise.resolve(t));
+      setAuthTokenGetter(() => Promise.resolve(localStorage.getItem("cthulu_auth_token")));
       return t;
     }
     // Clear invalid/expired token

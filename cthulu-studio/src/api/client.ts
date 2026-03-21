@@ -106,6 +106,7 @@ async function apiFetch<T>(
       if (res.status === 401 && getTokenFn) {
         localStorage.removeItem("cthulu_auth_token");
         window.location.reload();
+        return new Promise(() => {}) as T; // prevent downstream error handling during reload
       }
       const body = await res.text();
       log("error", `${method} ${path} -> ${res.status} (${elapsed}ms)`, body);

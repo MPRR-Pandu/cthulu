@@ -162,6 +162,9 @@ pub struct AuthUser {
 }
 
 impl AuthUser {
+    /// Hardcoded dev identity — used when auth is disabled.
+    /// Note: this bypasses the user_id charset validation in FromRequestParts.
+    /// If this ever accepts dynamic input, add the same [a-zA-Z0-9_-] check.
     pub fn dev_user() -> Self {
         Self {
             user_id: "dev_user".to_string(),
@@ -274,7 +277,7 @@ async fn signup(
     if body.password.len() < 8 {
         return (
             StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "Password must be at least 8 bytes" })),
+            Json(json!({ "error": "Password too short" })),
         );
     }
     let password = body.password;

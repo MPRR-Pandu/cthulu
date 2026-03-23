@@ -87,7 +87,7 @@ export default function AuthGate({ children }: AuthGateProps) {
 
   return <AuthForm onSuccess={(t) => {
     localStorage.setItem("cthulu_auth_token", t);
-    setAuthTokenGetter(() => Promise.resolve(t));
+    setAuthTokenGetter(() => Promise.resolve(localStorage.getItem("cthulu_auth_token")));
     setToken(t);
   }} />;
 }
@@ -116,6 +116,11 @@ function AuthForm({ onSuccess }: { onSuccess: (token: string) => void }) {
 
       if (!res.ok) {
         setError(data.error || `Failed (${res.status})`);
+        return;
+      }
+
+      if (!data.token || !isTokenValid(data.token)) {
+        setError("Received invalid token from server");
         return;
       }
 

@@ -56,7 +56,9 @@ export function getAuthTokenSync(): string | null {
   return localStorage.getItem("cthulu_auth_token");
 }
 
-/** Append ?token= to a URL for EventSource connections (which can't set headers). */
+/** Append ?token= to a URL for EventSource connections (which can't set headers).
+ * Security note: tokens in query strings appear in server logs and browser history.
+ * Ensure server access logs redact query params in production. */
 export function withAuthToken(url: string): string {
   const token = getAuthTokenSync();
   if (!token) return url;
@@ -106,7 +108,7 @@ async function apiFetch<T>(
       if (res.status === 401 && getTokenFn) {
         localStorage.removeItem("cthulu_auth_token");
         window.location.reload();
-        return new Promise(() => {}) as T; // prevent downstream error handling during reload
+        throw new Error("Session expired");
       }
       const body = await res.text();
       log("error", `${method} ${path} -> ${res.status} (${elapsed}ms)`, body);

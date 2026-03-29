@@ -208,6 +208,23 @@ Sessions (sessions.yaml, local state)
 | Skills | [.claude/skills/](.claude/skills/) -- Rust/Axum, React Flow, Nx, Claude CLI |
 | Lessons | [.claude/lessons.md](.claude/lessons.md) -- recorded mistakes and insights |
 | Dead Ends | [NOPE.md](NOPE.md) -- approaches that don't work |
+| **Scaffold Toolkit** | [claude-scaffold](https://github.com/MPRR-Pandu/claude-scaffold) -- reusable generator for bootstrapping AI agent context in new projects |
+
+---
+
+## Claude Scaffold
+
+The `.claude/` structure, skills, rules, and documentation patterns in this repo were extracted into a standalone, reusable toolkit: **[claude-scaffold](https://github.com/MPRR-Pandu/claude-scaffold)**.
+
+It provides an interactive `init.sh` generator that drops parameterized versions of these files into any new project:
+
+- `CLAUDE.md`, `AGENT.md`, `NOPE.md`, `LESSONS.md`, `docs/AI-WORKFLOW.md`
+- 10 generic skills (agentic patterns, git workflow, debugging, testing, etc.)
+- Project-specific skill templates
+
+**When to use it**: When starting a new repo and you want AI agents to have full context from the first prompt. Run `./init.sh --target /path/to/new-project` and fill in the prompts.
+
+**Relationship to this repo**: Cthulu is the source project where these patterns were developed and battle-tested. The scaffold is a generalized, project-agnostic extraction. Improvements discovered here should be upstreamed to the scaffold, and vice versa.
 
 ---
 
